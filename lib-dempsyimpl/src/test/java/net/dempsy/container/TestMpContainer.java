@@ -448,77 +448,78 @@ public class TestMpContainer {
     @Test
     public void testEvictCollision() throws Throwable {
         // This forces the instantiation of an Mp
-        final BlockingQueueAdaptor adaptor = context.getBean(BlockingQueueAdaptor.class);
-        assertNotNull(adaptor);
-        adaptor.setFailFast(true);
+        try (final BlockingQueueAdaptor adaptor = context.getBean(BlockingQueueAdaptor.class);) {
+            assertNotNull(adaptor);
+            adaptor.setFailFast(true);
 
-        inputQueue.add(serializer.serialize(new ContainerTestMessage("foo")));
-        // Once the poll finishes the Mp is instantiated and handling messages.
-        assertNotNull(outputQueue.poll(baseTimeoutMillis, TimeUnit.MILLISECONDS));
+            inputQueue.add(serializer.serialize(new ContainerTestMessage("foo")));
+            // Once the poll finishes the Mp is instantiated and handling messages.
+            assertNotNull(outputQueue.poll(baseTimeoutMillis, TimeUnit.MILLISECONDS));
 
-        assertEquals("did not create MP", 1, container.getProcessorCount());
+            assertEquals("did not create MP", 1, container.getProcessorCount());
 
-        final TestProcessor mp = (TestProcessor) container.getMessageProcessor("foo");
-        assertNotNull("MP not associated with expected key", mp);
-        assertEquals("activation count, 1st message", 1, mp.activationCount);
-        assertEquals("invocation count, 1st message", 1, mp.invocationCount);
+            final TestProcessor mp = (TestProcessor) container.getMessageProcessor("foo");
+            assertNotNull("MP not associated with expected key", mp);
+            assertEquals("activation count, 1st message", 1, mp.activationCount);
+            assertEquals("invocation count, 1st message", 1, mp.invocationCount);
 
-        // now we're going to cause the passivate to be held up.
-        mp.blockPassivate = new CountDownLatch(1);
-        mp.evict.set(true); // allow eviction
+            // now we're going to cause the passivate to be held up.
+            mp.blockPassivate = new CountDownLatch(1);
+            mp.evict.set(true); // allow eviction
 
-        // now kick off the evict in a separate thread since we expect it to hang
-        // until the mp becomes unstuck.
-        final AtomicBoolean evictIsComplete = new AtomicBoolean(false); // this will allow us to see the evict pass complete
-        final Thread thread = new Thread(new Runnable() {
-            @Override
-            public void run() {
-                container.evict();
-                evictIsComplete.set(true);
-            }
-        });
-        thread.start();
+            // now kick off the evict in a separate thread since we expect it to hang
+            // until the mp becomes unstuck.
+            final AtomicBoolean evictIsComplete = new AtomicBoolean(false); // this will allow us to see the evict pass complete
+            final Thread thread = new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    container.evict();
+                    evictIsComplete.set(true);
+                }
+            });
+            thread.start();
 
-        Thread.sleep(50); // let it get going.
-        assertFalse(evictIsComplete.get()); // check to see we're hung.
+            Thread.sleep(50); // let it get going.
+            assertFalse(evictIsComplete.get()); // check to see we're hung.
 
-        final MetricGetters sc = (MetricGetters) container.getStatsCollector();
-        assertEquals(0, sc.getMessageCollisionCount());
+            final MetricGetters sc = (MetricGetters) container.getStatsCollector();
+            assertEquals(0, sc.getMessageCollisionCount());
 
-        // sending it a message will now cause it to have the collision tick up
-        inputQueue.add(serializer.serialize(new ContainerTestMessage("foo")));
+            // sending it a message will now cause it to have the collision tick up
+            inputQueue.add(serializer.serialize(new ContainerTestMessage("foo")));
 
-        assertTrue(TestUtils.poll(baseTimeoutMillis, sc, new TestUtils.Condition<MetricGetters>() {
-            @Override
-            public boolean conditionMet(final MetricGetters o) {
-                return o.getMessageCollisionCount() == 1;
-            }
-        }));
+            assertTrue(TestUtils.poll(baseTimeoutMillis, sc, new TestUtils.Condition<MetricGetters>() {
+                @Override
+                public boolean conditionMet(final MetricGetters o) {
+                    return o.getMessageCollisionCount() == 1;
+                }
+            }));
 
-        // now let the evict finish
-        mp.blockPassivate.countDown();
+            // now let the evict finish
+            mp.blockPassivate.countDown();
 
-        // wait until the eviction completes
-        assertTrue(TestUtils.poll(baseTimeoutMillis, evictIsComplete, new TestUtils.Condition<AtomicBoolean>() {
-            @Override
-            public boolean conditionMet(final AtomicBoolean o) {
-                return o.get();
-            }
-        }));
+            // wait until the eviction completes
+            assertTrue(TestUtils.poll(baseTimeoutMillis, evictIsComplete, new TestUtils.Condition<AtomicBoolean>() {
+                @Override
+                public boolean conditionMet(final AtomicBoolean o) {
+                    return o.get();
+                }
+            }));
 
-        // invocationCount should still be 1 from the initial invocation that caused the clone
-        assertEquals(1, mp.invocationCount);
+            // invocationCount should still be 1 from the initial invocation that caused the clone
+            assertEquals(1, mp.invocationCount);
 
-        // send a message that should go through
-        inputQueue.add(serializer.serialize(new ContainerTestMessage("foo")));
+            // send a message that should go through
+            inputQueue.add(serializer.serialize(new ContainerTestMessage("foo")));
 
-        // Once the poll finishes a new Mp is instantiated and handling messages.
-        assertNotNull(outputQueue.poll(baseTimeoutMillis, TimeUnit.MILLISECONDS));
+            // Once the poll finishes a new Mp is instantiated and handling messages.
+            assertNotNull(outputQueue.poll(baseTimeoutMillis, TimeUnit.MILLISECONDS));
 
-        final TestProcessor mp2 = (TestProcessor) container.getMessageProcessor("foo");
+            final TestProcessor mp2 = (TestProcessor) container.getMessageProcessor("foo");
 
-        // make sure this new Mp isn't the old one.
-        assertTrue(mp != mp2);
+            // make sure this new Mp isn't the old one.
+            assertTrue(mp != mp2);
+        }
 
     }
 
@@ -531,87 +532,88 @@ public class TestMpContainer {
         setUp("false");
 
         // This forces the instantiation of an Mp
-        final BlockingQueueAdaptor adaptor = context.getBean(BlockingQueueAdaptor.class);
-        assertNotNull(adaptor);
+        try (final BlockingQueueAdaptor adaptor = context.getBean(BlockingQueueAdaptor.class);) {
+            assertNotNull(adaptor);
 
-        inputQueue.add(serializer.serialize(new ContainerTestMessage("foo")));
-        // Once the poll finishes the Mp is instantiated and handling messages.
-        assertNotNull(outputQueue.poll(baseTimeoutMillis, TimeUnit.MILLISECONDS));
+            inputQueue.add(serializer.serialize(new ContainerTestMessage("foo")));
+            // Once the poll finishes the Mp is instantiated and handling messages.
+            assertNotNull(outputQueue.poll(baseTimeoutMillis, TimeUnit.MILLISECONDS));
 
-        assertEquals("did not create MP", 1, container.getProcessorCount());
+            assertEquals("did not create MP", 1, container.getProcessorCount());
 
-        final TestProcessor mp = (TestProcessor) container.getMessageProcessor("foo");
-        assertNotNull("MP not associated with expected key", mp);
-        assertEquals("activation count, 1st message", 1, mp.activationCount);
-        assertEquals("invocation count, 1st message", 1, mp.invocationCount);
+            final TestProcessor mp = (TestProcessor) container.getMessageProcessor("foo");
+            assertNotNull("MP not associated with expected key", mp);
+            assertEquals("activation count, 1st message", 1, mp.activationCount);
+            assertEquals("invocation count, 1st message", 1, mp.invocationCount);
 
-        // now we're going to cause the passivate to be held up.
-        mp.blockPassivate = new CountDownLatch(1);
-        mp.evict.set(true); // allow eviction
+            // now we're going to cause the passivate to be held up.
+            mp.blockPassivate = new CountDownLatch(1);
+            mp.evict.set(true); // allow eviction
 
-        // now kick off the evict in a separate thread since we expect it to hang
-        // until the mp becomes unstuck.
-        final AtomicBoolean evictIsComplete = new AtomicBoolean(false); // this will allow us to see the evict pass complete
-        final Thread thread = new Thread(new Runnable() {
-            @Override
-            public void run() {
-                container.evict();
-                evictIsComplete.set(true);
-            }
-        });
-        thread.start();
+            // now kick off the evict in a separate thread since we expect it to hang
+            // until the mp becomes unstuck.
+            final AtomicBoolean evictIsComplete = new AtomicBoolean(false); // this will allow us to see the evict pass complete
+            final Thread thread = new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    container.evict();
+                    evictIsComplete.set(true);
+                }
+            });
+            thread.start();
 
-        Thread.sleep(500); // let it get going.
-        assertFalse(evictIsComplete.get()); // check to see we're hung.
+            Thread.sleep(500); // let it get going.
+            assertFalse(evictIsComplete.get()); // check to see we're hung.
 
-        final MetricGetters sc = (MetricGetters) container.getStatsCollector();
-        assertEquals(0, sc.getMessageCollisionCount());
+            final MetricGetters sc = (MetricGetters) container.getStatsCollector();
+            assertEquals(0, sc.getMessageCollisionCount());
 
-        // sending it a message will now cause it to have the collision tick up
-        inputQueue.add(serializer.serialize(new ContainerTestMessage("foo")));
+            // sending it a message will now cause it to have the collision tick up
+            inputQueue.add(serializer.serialize(new ContainerTestMessage("foo")));
 
-        // give it some time.
-        Thread.sleep(100);
+            // give it some time.
+            Thread.sleep(100);
 
-        // make sure there's no collision
-        assertEquals(0, sc.getMessageCollisionCount());
+            // make sure there's no collision
+            assertEquals(0, sc.getMessageCollisionCount());
 
-        // make sure the message didn't get through
-        assertNull(outputQueue.peek());
+            // make sure the message didn't get through
+            assertNull(outputQueue.peek());
 
-        // make sure no message got handled
-        assertEquals(1, mp.invocationCount); // 1 is the initial invocation that caused the instantiation.
+            // make sure no message got handled
+            assertEquals(1, mp.invocationCount); // 1 is the initial invocation that caused the instantiation.
 
-        // now let the evict finish
-        mp.blockPassivate.countDown();
+            // now let the evict finish
+            mp.blockPassivate.countDown();
 
-        // wait until the eviction completes
-        assertTrue(TestUtils.poll(baseTimeoutMillis, evictIsComplete, new TestUtils.Condition<AtomicBoolean>() {
-            @Override
-            public boolean conditionMet(final AtomicBoolean o) {
-                return o.get();
-            }
-        }));
+            // wait until the eviction completes
+            assertTrue(TestUtils.poll(baseTimeoutMillis, evictIsComplete, new TestUtils.Condition<AtomicBoolean>() {
+                @Override
+                public boolean conditionMet(final AtomicBoolean o) {
+                    return o.get();
+                }
+            }));
 
-        // Once the poll finishes a new Mp is instantiated and handling messages.
-        assertNotNull(outputQueue.poll(baseTimeoutMillis, TimeUnit.MILLISECONDS));
+            // Once the poll finishes a new Mp is instantiated and handling messages.
+            assertNotNull(outputQueue.poll(baseTimeoutMillis, TimeUnit.MILLISECONDS));
 
-        // get the new Mp
-        final TestProcessor mp2 = (TestProcessor) container.getMessageProcessor("foo");
+            // get the new Mp
+            final TestProcessor mp2 = (TestProcessor) container.getMessageProcessor("foo");
 
-        // invocationCount should be 1 from the initial invocation that caused the clone, and no more
-        assertEquals(1, mp.invocationCount);
-        assertEquals(1, mp2.invocationCount);
-        assertTrue(mp != mp2);
+            // invocationCount should be 1 from the initial invocation that caused the clone, and no more
+            assertEquals(1, mp.invocationCount);
+            assertEquals(1, mp2.invocationCount);
+            assertTrue(mp != mp2);
 
-        // send a message that should go through
-        inputQueue.add(serializer.serialize(new ContainerTestMessage("foo")));
+            // send a message that should go through
+            inputQueue.add(serializer.serialize(new ContainerTestMessage("foo")));
 
-        // Once the poll finishes mp2 invocationCount should be incremented
-        assertNotNull(outputQueue.poll(baseTimeoutMillis, TimeUnit.MILLISECONDS));
+            // Once the poll finishes mp2 invocationCount should be incremented
+            assertNotNull(outputQueue.poll(baseTimeoutMillis, TimeUnit.MILLISECONDS));
 
-        assertEquals(1, mp.invocationCount);
-        assertEquals(2, mp2.invocationCount);
+            assertEquals(1, mp.invocationCount);
+            assertEquals(2, mp2.invocationCount);
+        }
     }
 
     static class FixedInbound implements RoutingStrategy.Inbound {

@@ -19,22 +19,18 @@ package net.dempsy.messagetransport;
 /**
  * General checked Exception for MessageTransport functions
  */
-public class MessageTransportException extends Exception
-{
-   private static final long serialVersionUID = 1L;
+public class MessageTransportException extends Exception {
+    private static final long serialVersionUID = 1L;
 
-   public MessageTransportException(String message)
-   {
-      super(message);
-   }
+    public MessageTransportException(final String message) {
+        super(message);
+    }
 
-   public MessageTransportException(Throwable e)
-   {
-      super(e);
-   }
-   
-   public MessageTransportException(String message, Throwable e)
-   {
-      super(message, e);
-   }
+    public MessageTransportException(final Throwable e) {
+        super(e);
+    }
+
+    public MessageTransportException(final String message, final Throwable e) {
+        super(message, e);
+    }
 }

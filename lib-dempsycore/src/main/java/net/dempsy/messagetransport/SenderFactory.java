@@ -19,19 +19,22 @@ package net.dempsy.messagetransport;
 /**
  * Abstraction to create multiple sender based on destination.
  */
-public interface SenderFactory
-{
+public interface SenderFactory extends AutoCloseable {
 
-   public Sender getSender(Destination destination) throws MessageTransportException;
-   
-   /**
-    * stop() must be implemented such that it doesn't throw an exception no matter what
-    * but forces the stopping of any underlying resources that require stopping. Stop
-    * is expected to stop Senders that it created.
-    * 
-    * NOTE: stop() must be idempotent.
-    */
-   public void stop();
-   
-   public void reclaim(Destination destination);
+    public Sender getSender(Destination destination) throws MessageTransportException;
+
+    /**
+     * stop() must be implemented such that it doesn't throw an exception no matter what but forces the stopping of any underlying resources that require stopping. Stop is expected to stop Senders that it
+     * created.
+     * 
+     * NOTE: stop() must be idempotent.
+     */
+    public void stop();
+
+    public void reclaim(Destination destination);
+
+    @Override
+    default public void close() {
+        stop();
+    }
 }

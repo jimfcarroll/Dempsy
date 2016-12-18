@@ -18,20 +18,22 @@ package net.dempsy.messagetransport;
 
 import net.dempsy.monitoring.StatsCollector;
 
-public interface Receiver
-{
-   public Destination getDestination() throws MessageTransportException;
-   
-   public void setListener(Listener listener) throws MessageTransportException;
-   
-   public void start() throws MessageTransportException;
-   
-   public void stop();
-   
-   
-   /**
-    * This stats collector should be available to any Sender or Receiver that results
-    * from this Transport instance.
-    */
-   public void setStatsCollector(StatsCollector statsCollector);
+public interface Receiver extends AutoCloseable {
+    public Destination getDestination() throws MessageTransportException;
+
+    public void setListener(Listener listener) throws MessageTransportException;
+
+    public void start() throws MessageTransportException;
+
+    public void stop();
+
+    @Override
+    default void close() {
+        stop();
+    }
+
+    /**
+     * This stats collector should be available to any Sender or Receiver that results from this Transport instance.
+     */
+    public void setStatsCollector(StatsCollector statsCollector);
 }

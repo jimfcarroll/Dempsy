@@ -23,65 +23,63 @@ import org.quartz.JobDetail;
 import org.quartz.SchedulerException;
 import org.quartz.Trigger;
 import org.quartz.TriggerBuilder;
-import org.quartz.impl.StdSchedulerFactory;
-
-import net.dempsy.output.OutputExecuter;
-
 
 /**
- * The Class CronOutputScheduler. 
- * This class executes @Output method on MPs based on provided cron time expression (example: '*\/1 * * * * ?', run job at every one sec) 
- *  
+ * The Class CronOutputScheduler. This class executes @Output method on MPs based on provided cron time expression (example: '*\/1 * * * * ?', run job at every one sec)
+ * 
  */
 public class CronOutputSchedule extends AbstractOutputSchedule implements OutputExecuter {
 
-  /** The cron expression. */
-  private String cronExpression;
-  
-  /**
-   * Instantiates a new cron output scheduler.
-   *
-   * @param cronExpression the cron expression
-   */
-  public CronOutputSchedule(String cronExpression) {
-    this.cronExpression = cronExpression;
-  }
+    /** The cron expression. */
+    private final String cronExpression;
 
-   /* (non-Javadoc)
-   * @see com.nokia.dempsy.output.OutputExecuter#start()
-   */
-  public void start() {
-    try {
-      JobDetail jobDetail = super.getJobDetail();
-      Trigger trigger = getCronTrigger(cronExpression);
-      scheduler = StdSchedulerFactory.getDefaultScheduler();
-      scheduler.scheduleJob(jobDetail, trigger);
-      scheduler.start();
-    } catch (SchedulerException se) {
-      logger.error("Error occurred while starting the cron scheduler : " + se.getMessage(), se);
+    /**
+     * Instantiates a new cron output scheduler.
+     *
+     * @param cronExpression
+     *            the cron expression
+     */
+    public CronOutputSchedule(final String cronExpression) {
+        this.cronExpression = cronExpression;
     }
-  }
 
-  /**
-   * Gets the cron trigger.
-   *
-   * @param cronExpression the cron expression
-   * @return the cron trigger
-   */
-  private Trigger getCronTrigger(String cronExpression) {
-    CronScheduleBuilder cronScheduleBuilder = null;
-    Trigger cronTrigger = null;
-    try {
-      cronScheduleBuilder = CronScheduleBuilder.cronSchedule(cronExpression);
-      cronScheduleBuilder.withMisfireHandlingInstructionFireAndProceed();
-      TriggerBuilder<Trigger> cronTtriggerBuilder = TriggerBuilder.newTrigger();
-      cronTtriggerBuilder.withSchedule(cronScheduleBuilder);
-      cronTrigger = cronTtriggerBuilder.build();
-    } catch (ParseException pe) {
-      logger.error("Error occurred while builiding the cronTrigger : " + pe.getMessage(), pe);
+    /*
+     * (non-Javadoc)
+     * 
+     * @see com.nokia.dempsy.output.OutputExecuter#start()
+     */
+    @Override
+    public void start() {
+        try {
+            final JobDetail jobDetail = super.getJobDetail();
+            final Trigger trigger = getCronTrigger(cronExpression);
+            scheduler.scheduleJob(jobDetail, trigger);
+            scheduler.start();
+        } catch (final SchedulerException se) {
+            logger.error("Error occurred while starting the cron scheduler : " + se.getMessage(), se);
+        }
     }
-    return cronTrigger;
-  }
 
+    /**
+     * Gets the cron trigger.
+     *
+     * @param cronExpression
+     *            the cron expression
+     * @return the cron trigger
+     */
+    private Trigger getCronTrigger(final String cronExpression) {
+        CronScheduleBuilder cronScheduleBuilder = null;
+        Trigger cronTrigger = null;
+        try {
+            cronScheduleBuilder = CronScheduleBuilder.cronSchedule(cronExpression);
+            cronScheduleBuilder.withMisfireHandlingInstructionFireAndProceed();
+            final TriggerBuilder<Trigger> cronTtriggerBuilder = TriggerBuilder.newTrigger();
+            cronTtriggerBuilder.withSchedule(cronScheduleBuilder);
+            cronTrigger = cronTtriggerBuilder.build();
+        } catch (final ParseException pe) {
+            logger.error("Error occurred while builiding the cronTrigger : " + pe.getMessage(), pe);
+        }
+        return cronTrigger;
+    }
 
 }

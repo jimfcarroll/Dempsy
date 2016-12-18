@@ -46,6 +46,11 @@
     <module>lib-dempsyspring</module> 
     <!-- The sign on the door says: Out Of Order -->
     <!--      <module>lib-dempsyguice</module> -->
+
+    <!-- Refactored -->
+    <module>dempsy-framework.api</module>
+    <module>dempsy-framework.core</module>
+    <module>dempsy-framework.impl</module>
   </modules>
 
   <!--  Default dependencies that all Dempsy modules use -->
@@ -97,9 +102,24 @@
         <groupId>net.dempsy</groupId>
         <artifactId>lib-dempsyimpl</artifactId>
         <version>${project.version}</version>
+      </dependency> 
+      <dependency>
+        <groupId>net.dempsy</groupId>
+        <artifactId>dempsy-framework.api</artifactId>
+        <version>${project.version}</version>
+      </dependency> 
+      <dependency>
+        <groupId>net.dempsy</groupId>
+        <artifactId>dempsy-framework.core</artifactId>
+        <version>${project.version}</version>
       </dependency>
-      
+    
       <!-- Commons -->
+      <dependency>
+        <groupId>net.dempsy</groupId>
+        <artifactId>dempsy-utils</artifactId>
+        <version>2.0.1-SNAPSHOT</version>
+      </dependency>
       <dependency>
         <groupId>net.dempsy</groupId>
         <artifactId>dempsy-cluster.api</artifactId>
