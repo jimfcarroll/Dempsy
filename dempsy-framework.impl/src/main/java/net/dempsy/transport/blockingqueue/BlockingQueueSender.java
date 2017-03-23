@@ -19,106 +19,85 @@ package net.dempsy.transport.blockingqueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-import net.dempsy.messagetransport.MessageTransportException;
-import net.dempsy.messagetransport.OverflowHandler;
-import net.dempsy.messagetransport.Sender;
 import net.dempsy.monitoring.StatsCollector;
+import net.dempsy.transport.MessageTransportException;
+import net.dempsy.transport.Sender;
 
 /**
- * <p>The Message transport default library comes with this BlockingQueue implementation.</p>
+ * <p>
+ * The Message transport default library comes with this BlockingQueue implementation.
+ * </p>
  * 
- * <p>This class represents the Sender. You need to initialize it with the BlockingQueue to use.</p>
+ * <p>
+ * This class represents the Sender. You need to initialize it with the BlockingQueue to use.
+ * </p>
  */
-public class BlockingQueueSender implements Sender
-{
-   protected BlockingQueue<byte[]> queue;
-   protected OverflowHandler overflowHandler;
-   
-   protected AtomicBoolean shutdown = new AtomicBoolean(false);
+public class BlockingQueueSender implements Sender {
 
-   protected boolean blocking = true;
-   protected StatsCollector statsCollector;
-   
-   public BlockingQueueSender(StatsCollector statsCollector) { this.statsCollector = statsCollector; }
-   
-   /**
-    * This satisfies the requirement of a MessageTransportSender. It will stop the thread
-    * that's handling the receive side of the BlockingQueue. @PreDestroy is set so that
-    * containers that handle standard bean lifecycle annotations will automatically issue 
-    * a 'shutdown' when the container is stopped.
-    */
-   public void shuttingDown()
-   {
-      shutdown.set(true);
-   }
+    private final BlockingQueue<byte[]> queue;
+    private final StatsCollector statsCollector;
+    private final boolean blocking;
+    private final AtomicBoolean shutdown = new AtomicBoolean(false);
 
-   /**
-    * Send a message into the BlockingQueueAdaptor.
-    */
-   @Override
-   public void send(byte[] messageBytes) throws MessageTransportException
-   {
-      if (shutdown.get())
-         throw new MessageTransportException("send called on shutdown queue.");
-      
-      if (blocking)
-      {
-         while (true)
-         {
-            try { queue.put(messageBytes); if (statsCollector != null) statsCollector.messageSent(messageBytes); break; }
-            catch (InterruptedException ie)
-            {
-               if (shutdown.get())
-                  throw new MessageTransportException("Shutting down durring send.");
+    /**
+     * <p>
+     * blocking is 'true' by default (after all this is a <b>Blocking</b>Queue implementation).
+     * </p>
+     * 
+     * <p>
+     * If blocking is true then the transport will use the blocking calls on the BlockingQueue when sending, and therefore the OverflowHandler, whether set or not, will never get called.</p?
+     * 
+     * <p>
+     * When blocking is 'false' a send to a full queue will result in:
+     * <li>if the MessageOverflowHandler is set, it will pass the message to it.</li>
+     * <li>otherwise it will throw a MessageTransportException.</li>
+     * </p>
+     * 
+     * @param blocking
+     *            is whether or not to set this queue to blocking. It can be changed after a queue is started but there is no synchronization around the checking in the send method.
+     */
+    public BlockingQueueSender(final BlockingQueue<byte[]> queue, final boolean blocking, final StatsCollector statsCollector) {
+        this.statsCollector = statsCollector;
+        this.queue = queue;
+        this.blocking = blocking;
+    }
+
+    public BlockingQueueSender(final BlockingQueue<byte[]> queue) {
+        this(queue, true, null);
+    }
+
+    /**
+     * Send a message into the BlockingQueueAdaptor.
+     */
+    @Override
+    public void send(final byte[] messageBytes) throws MessageTransportException {
+        if (shutdown.get())
+            throw new MessageTransportException("send called on shutdown queue.");
+
+        if (blocking) {
+            while (true) {
+                try {
+                    queue.put(messageBytes);
+                    if (statsCollector != null)
+                        statsCollector.messageSent(messageBytes);
+                    break;
+                } catch (final InterruptedException ie) {
+                    if (shutdown.get())
+                        throw new MessageTransportException("Shutting down durring send.");
+                }
             }
-         }
-      }
-      else
-      {
-         if (! queue.offer(messageBytes))
-         {
-            if (statsCollector != null) statsCollector.messageNotSent();
-            if (overflowHandler != null)
-               overflowHandler.overflow(messageBytes);
-            else
-               throw new MessageTransportException("Failed to queue message due to capacity.");
-         }
-         else
-            if (statsCollector != null) statsCollector.messageSent(messageBytes);
-      }
-   }
-   
-   /**
-    * This sets the BlockingQueue implementation to be used in the transport. 
-    * It must be set prior to starting.
-    * 
-    * @param queue is the BlockingQueue implementation to use.
-    */
-   public void setQueue(BlockingQueue<byte[]> queue){ this.queue = queue; }
-   
-   /**
-    * This can be set optionally and will be used on the send side. 
-    * @param overflowHandler
-    */
-   public void setOverflowHandler(OverflowHandler overflowHandler){ this.overflowHandler = overflowHandler; }
-   
-   /**
-    * <p>blocking is 'true' be default (after all this is a <b>Blocking</b>Queue 
-    * implementation).</p>
-    * 
-    * <p>If blocking is true then the transport will use the blocking calls on the
-    * BlockingQueue when sending, and therefore the OverflowHandler, whether set or not,
-    * will never get called.</p?
-    * 
-    * <p>When blocking is 'false' a send to a full queue will result in:
-    * <li> if the MessageOverflowHandler is set, it will pass the message to it.</li>
-    * <li> otherwise it will throw a MessageTransportException. </li>
-    * </p>
-    * 
-    * @param blocking is whether or not to set this queue to blocking. It can be
-    * changed after a queue is started but there is no synchronization around the
-    * checking in the send method.
-    */
-   public void setBlocking(boolean blocking) { this.blocking = blocking; }
-   
+        } else {
+            if (!queue.offer(messageBytes)) {
+                if (statsCollector != null)
+                    statsCollector.messageNotSent();
+                throw new MessageTransportException("Failed to queue message due to capacity.");
+            } else if (statsCollector != null)
+                statsCollector.messageSent(messageBytes);
+        }
+    }
+
+    @Override
+    public void close() {
+        shutdown.set(true);
+    }
 }

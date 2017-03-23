@@ -18,14 +18,17 @@ package net.dempsy.transport.blockingqueue;
 
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicLong;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import net.dempsy.threading.ThreadingModel;
+import net.dempsy.transport.NodeAddress;
 import net.dempsy.transport.Listener;
 import net.dempsy.transport.MessageTransportException;
 import net.dempsy.transport.Receiver;
+import net.dempsy.util.SafeString;
 
 /**
  * <p>
@@ -43,14 +46,16 @@ import net.dempsy.transport.Receiver;
  */
 public class BlockingQueueReceiver implements Runnable, Receiver {
     private static Logger LOGGER = LoggerFactory.getLogger(BlockingQueueReceiver.class);
+    private static final AtomicLong receiverNumber = new AtomicLong();
 
-    private Thread running;
-    private String name;
-    private final AtomicReference<Listener> listener = new AtomicReference<Listener>();
-    private final AtomicBoolean shutdown = new AtomicBoolean(false);
-    private BlockingQueueDestination destination = null;
-    private boolean failFast = false; // this has been the default - since it's equivalent to there being no overflowHandler
-    private boolean explicitFailFast = false;
+    private final BlockingQueueAddress address;
+    private final BlockingQueue<byte[]> queue;
+
+    private Listener listener = null;
+
+    private final AtomicBoolean running = new AtomicBoolean(false);
+    private Thread currentThread = null;
+    private boolean shutdown;
 
     /**
      * <p>
@@ -68,58 +73,41 @@ public class BlockingQueueReceiver implements Runnable, Receiver {
      * @throws MessageTransportException
      *             if the BlockingQueue implementation isn't set or if the listener to send the messages to isn't set.
      */
-    public void start() throws MessageTransportException {
-        running = name == null ? new Thread(this) : new Thread(this, name);
-        running.setDaemon(true);
-        running.start();
-    }
-
-    @Override
-    public synchronized void close() {
-        shutdown.set(true);
-        if (running != null)
-            running.interrupt();
+    public BlockingQueueReceiver(final BlockingQueue<byte[]> queue) {
+        this.queue = queue;
+        this.address = new BlockingQueueAddress(queue);
     }
 
     @Override
     public void run() {
         synchronized (this) {
-            if (running == null)
-                // this is done in case start() wasn't used to start this thread.
-                running = Thread.currentThread();
-            else if (running != Thread.currentThread()) {
-                LOGGER.error(
-                        BlockingQueueReceiver.class.getSimpleName() + " was started in a Runnable more than once. Exiting the additional thread.");
+            currentThread = Thread.currentThread();
+
+            if (shutdown == true)
                 return;
-            }
+
+            running.set(true);
         }
 
-        while (!shutdown.get()) {
-            try {
-                final byte[] val = destination.queue.take();
-                final Listener curListener = listener.get();
+        final Listener curListener = listener;
 
-                final boolean messageSuccess = curListener == null ? false : curListener.onMessage(val, failFast);
-                if (overflowHandler != null && !messageSuccess)
-                    overflowHandler.overflow(val);
+        // This check is cheap but unlocked
+        while (!shutdown) {
+            try {
+                final byte[] val = queue.take();
+                curListener.onMessage(val);
             } catch (final InterruptedException ie) {
-                // if we were interrupted we're probably stopping.
-                if (!shutdown.get())
-                    LOGGER.warn("Superfluous interrupt.", ie);
-            } catch (final Throwable err) {
+                synchronized (this) {
+                    // if we were interrupted we're probably stopping.
+                    if (!shutdown)
+                        LOGGER.warn("Superfluous interrupt.", ie);
+                }
+            } catch (final MessageTransportException | RuntimeException err) {
                 LOGGER.error("Exception while handling message.", err);
             }
         }
-    }
 
-    /**
-     * Sets the name of this BlockingQueueAdaptor which is currently used in the start method as the name of the Thread that's created.
-     * 
-     * @param name
-     *            is the name to set the BlockingQueueAdaptor to.
-     */
-    public void setName(final String name) {
-        this.name = name;
+        running.set(false);
     }
 
     /**
@@ -129,38 +117,33 @@ public class BlockingQueueReceiver implements Runnable, Receiver {
      *            is the MessageTransportListener to push messages to when they come in.
      */
     @Override
-    public void setListener(final Listener listener) {
-        this.listener.set(listener);
-    }
-
-    /**
-     * When an overflow handler is set the Adaptor indicates that a 'failFast' should happen and any failed message deliveries end up passed to the overflow handler.
-     */
-    public void setOverflowHandler(final OverflowHandler handler) {
-        this.overflowHandler = handler;
-        if (!explicitFailFast)
-            failFast = (handler != null);
-    }
-
-    public void setFailFast(final boolean failFast) {
-        explicitFailFast = true;
-        this.failFast = failFast;
-    }
-
-    public BlockingQueue<byte[]> getQueue() {
-        return destination == null ? null : destination.queue;
-    }
-
-    public void setQueue(final BlockingQueue<byte[]> queue) {
-        this.destination = new BlockingQueueDestination(queue);
+    public synchronized void start(final Listener listener, final ThreadingModel threadingModel) {
+        if (listener == null)
+            throw new IllegalArgumentException("Cannot pass null to " + BlockingQueueReceiver.class.getSimpleName() + ".setListener");
+        if (this.listener != null)
+            throw new IllegalStateException(
+                    "Cannot set a new Listener (" + SafeString.objectDescription(listener) + ") on a " + BlockingQueueReceiver.class.getSimpleName()
+                            + " when there's one already set (" + SafeString.objectDescription(this.listener) + ")");
+        this.listener = listener;
+        threadingModel.runDaemon(this, BlockingQueueReceiver.class.getSimpleName() + "-" + receiverNumber.getAndIncrement());
     }
 
     @Override
-    public Destination getDestination() {
-        return this.destination;
+    public void close() {
+        synchronized (this) {
+            shutdown = true;
+        }
+
+        while (running.get()) {
+            if (currentThread != null)
+                currentThread.interrupt();
+            Thread.yield();
+        }
     }
 
     @Override
-    public void setStatsCollector(final StatsCollector statsCollector) {}
+    public NodeAddress getAddress() {
+        return this.address;
+    }
 
 }

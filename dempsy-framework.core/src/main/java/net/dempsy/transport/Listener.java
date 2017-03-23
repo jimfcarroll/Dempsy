@@ -16,34 +16,25 @@
 
 package net.dempsy.transport;
 
-
 /**
- * <p>This is the core abstraction for receiving messages. The client side of
- * a transport implementation (called an "Adaptor") needs to be wired to a 
- * MessageTransportListener</p>
+ * <p>
+ * This is the core abstraction for receiving messages. The client side of a transport implementation (called an "Adaptor") needs to be wired to a MessageTransportListener
+ * </p>
  */
-public interface Listener
-{
-   /**
-    * <p>Method that accepts the callback for received messages. Given that the 
-    * transport is responsible for managing threads, the transport will also let
-    * the Listener implementation know if it should make every effort to 
-    * handle the request or if it should "fail-fast."</p>
-    * 
-    * <p>fail-fast means that the Listener should not attempt to handle a request
-    * if any blocking is required. In cases where the Listener determines there is
-    * going to be a delay in processing the request it should simple return 'false'
-    * as an indication that the message was not handled and allow the transport
-    * implementation to deal with it.</p>
-    *  
-    * @param messageBytes The message bytes received
-    * @throws MessageTransportException
-    */
-   public boolean onMessage(byte[] messageBytes, boolean failFast) throws MessageTransportException;
-   
-   /**
-    * The transport implementation is responsible for letting the MessageTransportListener
-    * know that the transport is being shut down. 
-    */
-   public void shuttingDown();
+public interface Listener extends AutoCloseable {
+    /**
+     * <p>
+     * Method that accepts the callback for received messages. Given that the transport is responsible for managing threads, the transport will also let the Listener implementation know if it should make every
+     * effort to handle the request or if it should "fail-fast."
+     * </p>
+     * 
+     * @param messageBytes
+     *            The message bytes received
+     * @throws MessageTransportException
+     */
+    public boolean onMessage(byte[] messageBytes) throws MessageTransportException;
+
+    @Override
+    public default void close() {}
+
 }

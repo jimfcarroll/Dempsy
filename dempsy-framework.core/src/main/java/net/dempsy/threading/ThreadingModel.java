@@ -1,4 +1,4 @@
-package net.dempsy.executor;
+package net.dempsy.threading;
 
 import java.util.concurrent.Callable;
 import java.util.concurrent.Future;
@@ -10,10 +10,10 @@ import java.util.concurrent.TimeUnit;
  * acknowledged delivery of messages then the Executor should be able to apply 'back pressure' but blocking in the submitLimted.
  * </p>
  */
-public interface DempsyExecutor {
+public interface ThreadingModel extends AutoCloseable {
 
     /**
-     * This is an interface that represents a Callable that can be rejected if the Thr
+     * This is an interface that represents a Callable that can be rejected if the ThreadingModel deems it's to be rejected.
      */
     public static interface Rejectable<V> extends Callable<V> {
         public void rejected();
@@ -34,6 +34,8 @@ public interface DempsyExecutor {
      */
     public <V> Future<V> schedule(Callable<V> r, long delay, TimeUnit timeUnit);
 
+    public void runDaemon(Runnable daemon, String name);
+
     /**
      * How many pending tasks are there.
      */
@@ -52,7 +54,8 @@ public interface DempsyExecutor {
     /**
      * Perform a clean shutdown of the executor
      */
-    public void shutdown();
+    @Override
+    public void close();
 
     /**
      * This return value may not be valid prior to start().

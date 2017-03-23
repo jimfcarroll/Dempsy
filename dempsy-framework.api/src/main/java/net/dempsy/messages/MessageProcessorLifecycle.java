@@ -2,7 +2,21 @@ package net.dempsy.messages;
 
 import java.lang.reflect.InvocationTargetException;
 
-public interface MessageProcessorLifecycle {
+import net.dempsy.config.ClusterId;
+
+public interface MessageProcessorLifecycle<T> {
+
+    public static class KeyedMessage {
+        public final Object key;
+        public final String[] messageTypes;
+        public final Object message;
+
+        public KeyedMessage(final Object key, final Object message, final String... messageTypes) {
+            this.key = key;
+            this.message = message;
+            this.messageTypes = messageTypes;
+        }
+    }
 
     /**
      * Creates a new instance from the prototype.
@@ -12,7 +26,7 @@ public interface MessageProcessorLifecycle {
     /**
      * Invokes the activation method of the passed instance.
      */
-    public boolean activate(Object instance, Object key, byte[] activationData)
+    public void activate(T instance, Object key, byte[] activationData)
             throws IllegalArgumentException, IllegalAccessException, InvocationTargetException;
 
     /**
@@ -22,7 +36,7 @@ public interface MessageProcessorLifecycle {
      * @throws IllegalAccessException
      * @throws IllegalArgumentException
      */
-    public byte[] passivate(Object instance) throws IllegalArgumentException, IllegalAccessException, InvocationTargetException;
+    public byte[] passivate(T instance) throws IllegalArgumentException, IllegalAccessException, InvocationTargetException;
 
     /**
      * Invokes the appropriate message handler of the passed instance. Caller is responsible for not passing <code>null</code> messages.
@@ -31,7 +45,7 @@ public interface MessageProcessorLifecycle {
      * @throws IllegalAccessException
      * @throws IllegalArgumentException
      */
-    public Object invoke(Object instance, Object message)
+    public KeyedMessage[] invoke(T instance, Object message)
             throws IllegalArgumentException, IllegalAccessException, InvocationTargetException;
 
     /**
@@ -41,41 +55,21 @@ public interface MessageProcessorLifecycle {
      * @throws IllegalAccessException
      * @throws IllegalArgumentException
      */
-    public Object invokeOutput(Object instance) throws IllegalArgumentException, IllegalAccessException, InvocationTargetException;
+    public KeyedMessage[] invokeOutput(T instance) throws IllegalArgumentException, IllegalAccessException, InvocationTargetException;
 
     /**
      * Invokes the evictable method on the provided instance. If the evictable is not implemented, returns false.
      * 
      * @param instance
-     * @return
      * @throws IllegalArgumentException
      * @throws IllegalAccessException
      * @throws InvocationTargetException
      */
-    public boolean invokeEvictable(Object instance) throws IllegalArgumentException, IllegalAccessException, InvocationTargetException;
+    public void invokeEvictable(T instance) throws IllegalArgumentException, IllegalAccessException, InvocationTargetException;
 
-    /**
-     * Determines whether this MP provides an output method.
-     */
-    public boolean isOutputSupported();
+    public String[] messagesTypesHandled();
 
-    /**
-     * Determines whether this MP provides an evictable method.
-     */
-    public boolean isEvictableSupported();
+    public void validate() throws IllegalStateException;
 
-    public static enum Operation {
-        handle,
-        output
-    };
-
-    /**
-     * Provide a description of the invocation for the specified operation. This is used for error messages, exceptions, and logging.
-     * 
-     * @param op
-     * @param message
-     * @return
-     */
-    public String invokeDescription(final Operation op, final Object message);
-
+    public void start(ClusterId myCluster);
 }

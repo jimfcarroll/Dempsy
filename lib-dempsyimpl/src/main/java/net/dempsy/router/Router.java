@@ -87,7 +87,7 @@ import net.dempsy.serialization.Serializer;
 public class Router implements Dispatcher, RoutingStrategy.Outbound.Coordinator {
     private static Logger logger = LoggerFactory.getLogger(Router.class);
 
-    private final AnnotatedMethodInvoker methodInvoker = new AnnotatedMethodInvoker(MessageKey.class);
+    private final AnnotatedMethodInvoker messageKeyGetMethodInvoker = new AnnotatedMethodInvoker(MessageKey.class);
     private ApplicationDefinition applicationDefinition = null;
 
     private ConcurrentHashMap<Class<?>, Set<ClusterRouter>> routerMap = new ConcurrentHashMap<Class<?>, Set<ClusterRouter>>();
@@ -220,7 +220,7 @@ public class Router implements Dispatcher, RoutingStrategy.Outbound.Coordinator 
             Object msgKeysValue = null;
             try {
                 if (!stopTryingToSendTheseTypes.contains(messageClass))
-                    msgKeysValue = methodInvoker.invokeGetter(msg);
+                    msgKeysValue = messageKeyGetMethodInvoker.invokeGetter(msg);
             } catch (final IllegalArgumentException e1) {
                 stopTryingToSendTheseTypes.add(msg.getClass());
                 logger.warn("unable to retrieve key from message: " + String.valueOf(message) +

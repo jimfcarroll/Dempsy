@@ -19,7 +19,7 @@ package net.dempsy.transport;
 /**
  * A simple interface to send messages to a messaging server destination.
  */
-public interface Sender {
+public interface Sender extends AutoCloseable {
     /**
      * Sends the message. The implementor needs to take special handle exceptions from the underlying system correctly. The user of the <em>Sender</em> should not be required to release the sender and reaquire
      * it. The Sender should do that work.

@@ -19,46 +19,40 @@ package net.dempsy.transport.blockingqueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 
-import net.dempsy.executor.DempsyExecutor;
-import net.dempsy.messagetransport.MessageTransportException;
-import net.dempsy.messagetransport.OverflowHandler;
-import net.dempsy.messagetransport.Receiver;
-import net.dempsy.messagetransport.SenderFactory;
-import net.dempsy.messagetransport.Transport;
 import net.dempsy.monitoring.StatsCollector;
+import net.dempsy.transport.MessageTransportException;
+import net.dempsy.transport.Receiver;
+import net.dempsy.transport.SenderFactory;
+import net.dempsy.transport.Transport;
 
 public class BlockingQueueTransport implements Transport {
-    interface BlockingQueueFactory {
-        public BlockingQueue<byte[]> createBlockingQueue();
+
+    private final StatsCollector statsCollector;
+    private final int capacity;
+    private final boolean blocking;
+
+    public BlockingQueueTransport(final int capacity, final boolean blocking, final StatsCollector statsCollector) {
+        this.statsCollector = statsCollector;
+        this.capacity = capacity;
+        this.blocking = blocking;
     }
 
-    private final BlockingQueueFactory queueSource = null;
-    private OverflowHandler overflowHandler = null;
+    public BlockingQueueTransport() {
+        this(Integer.MAX_VALUE, true, null);
+    }
 
     @Override
-    public SenderFactory createOutbound(final DempsyExecutor executor, final StatsCollector statsCollector) {
-        final BlockingQueueSenderFactory ret = new BlockingQueueSenderFactory(statsCollector);
-        if (overflowHandler != null)
-            ret.setOverflowHandler(overflowHandler);
+    public SenderFactory createOutbound() {
+        return new BlockingQueueSenderFactory(blocking, statsCollector);
+    }
+
+    @Override
+    public Receiver createInbound() throws MessageTransportException {
+        final BlockingQueueReceiver ret = new BlockingQueueReceiver(getNewQueue());
         return ret;
-    }
-
-    @Override
-    public Receiver createInbound(final DempsyExecutor executor) throws MessageTransportException {
-        final BlockingQueueReceiver ret = new BlockingQueueReceiver();
-        ret.setQueue(getNewQueue());
-        if (overflowHandler != null)
-            ret.setOverflowHandler(overflowHandler);
-        ret.start(); // @PostConstruct
-        return ret;
-    }
-
-    @Override
-    public void setOverflowHandler(final OverflowHandler overflowHandler) {
-        this.overflowHandler = overflowHandler;
     }
 
     private BlockingQueue<byte[]> getNewQueue() {
-        return (queueSource == null) ? new LinkedBlockingQueue<byte[]>() : queueSource.createBlockingQueue();
+        return new LinkedBlockingQueue<byte[]>(capacity);
     }
 }

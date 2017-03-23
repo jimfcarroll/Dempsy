@@ -14,23 +14,13 @@
  * limitations under the License.
  */
 
-package net.dempsy;
+package net.dempsy.transport;
 
 /**
- * Checked Exception used by the Dispatch interface and also internal to the Dempsy framework.
+ * Abstraction to create multiple sender based on destination.
  */
-public class DempsyException extends RuntimeException {
-    private static final long serialVersionUID = 1L;
+public interface SenderFactory extends AutoCloseable {
 
-    public DempsyException(final String message, final Throwable cause) {
-        super(message, cause);
-    }
+    public Sender getSender(NodeAddress destination) throws MessageTransportException;
 
-    public DempsyException(final String message) {
-        super(message);
-    }
-
-    public DempsyException(final Throwable cause) {
-        super(cause);
-    }
 }

@@ -37,6 +37,7 @@
     <quartz.version>2.0.1</quartz.version>
     <kryo.version>2.20</kryo.version>
     <jackson.version>2.2.3</jackson.version>
+
   </properties>
 
   <modules>
@@ -123,6 +124,11 @@
       <dependency>
         <groupId>net.dempsy</groupId>
         <artifactId>dempsy-cluster.api</artifactId>
+        <version>2.0.1-SNAPSHOT</version>
+      </dependency>
+      <dependency>
+        <groupId>net.dempsy</groupId>
+        <artifactId>dempsy-serialization.api</artifactId>
         <version>2.0.1-SNAPSHOT</version>
       </dependency>
       <dependency>

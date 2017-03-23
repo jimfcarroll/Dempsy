@@ -16,27 +16,40 @@
 
 package net.dempsy.router;
 
-import net.dempsy.transport.Sender;
-import net.dempsy.transport.Transport;
+import javax.annotation.PostConstruct;
+
+import org.springframework.beans.factory.annotation.Autowired;
+
+import net.dempsy.cluster.ClusterInfoSession;
 
 /**
  * This Routing Strategy uses the MpCluster to negotiate with other instances in the cluster.
  */
 public class DecentralizedRoutingStrategy implements RoutingStrategy {
 
-    public final Transport transport;
     private final int defaultTotalSlots;
     private final int defaultNumNodes;
 
-    public DecentralizedRoutingStrategy(final Transport transport, final int defaultTotalSlots, final int defaultNumNodes) {
-        this.transport = transport;
+    ClusterInfoSession colab;
+
+    public DecentralizedRoutingStrategy(final int defaultTotalSlots, final int defaultNumNodes) {
         this.defaultTotalSlots = defaultTotalSlots;
         this.defaultNumNodes = defaultNumNodes;
     }
 
     @Override
-    public Sender selectDestinationForMessage(final Object messageKey, final Object message) {
+    public MpContainerAddress selectDestinationForMessage(final Object messageKey, final Object message) {
         return null;
     }
 
+    @Autowired
+    public void setCollaborator(final ClusterInfoSession colab) {
+        this.colab = colab;
+
+    }
+
+    @PostConstruct
+    public void initialize() {
+
+    }
 }

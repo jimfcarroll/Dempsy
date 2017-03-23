@@ -16,10 +16,20 @@
 
 package net.dempsy.router;
 
-import net.dempsy.transport.Sender;
+import net.dempsy.transport.NodeAddress;
 
 public interface RoutingStrategy {
 
-    public Sender selectDestinationForMessage(Object messageKey, Object message);
+    public static class MpContainerAddress {
+        public final NodeAddress node;
+        public final int cluster;
+
+        public MpContainerAddress(final NodeAddress node, final int cluster) {
+            this.node = node;
+            this.cluster = cluster;
+        }
+    }
+
+    public MpContainerAddress selectDestinationForMessage(Object messageKey, Object message);
 
 }

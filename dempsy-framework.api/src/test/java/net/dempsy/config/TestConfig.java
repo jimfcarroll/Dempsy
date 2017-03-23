@@ -31,12 +31,13 @@ import net.dempsy.lifecycle.annotations.Evictable;
 import net.dempsy.lifecycle.annotations.MessageHandler;
 import net.dempsy.lifecycle.annotations.MessageKey;
 import net.dempsy.lifecycle.annotations.MessageProcessor;
-import net.dempsy.lifecycle.annotations.MessageProcessor.CdBuild;
+import net.dempsy.lifecycle.annotations.Mp;
+import net.dempsy.lifecycle.annotations.Start;
 import net.dempsy.messages.Adaptor;
 import net.dempsy.messages.Dispatcher;
 import net.dempsy.messages.KeySource;
-import net.dempsy.lifecycle.annotations.Mp;
-import net.dempsy.lifecycle.annotations.Start;
+import net.dempsy.serialization.Serializer;
+import net.dempsy.serialization.java.JavaSerializer;
 
 public class TestConfig {
 
@@ -93,253 +94,207 @@ public class TestConfig {
 
     @Test
     public void testSimpleConfig() throws Throwable {
-        final ApplicationDefinition app = new ApplicationDefinition("test");
-        final ClusterDefinition cd = new ClusterDefinition("test-slot");
+        final Node node = new Node("test").setDefaultRoutingStrategy(new Object());
+        final Cluster cd = new Cluster("test-slot");
         cd.setMessageProcessor(new MessageProcessor(new GoodTestMp()));
-        app.add(cd);
+
+        node.setClusters(cd);
 
         // if we get to here without an error we should be okay
-        app.validate(); // this throws if there's a problem.
+        node.validate(); // this throws if there's a problem.
 
-        assertNull(app.getSerializer());
-
-        assertNull(app.getRoutingStrategy());
-
-        assertNull(cd.getStatsCollectorFactory());
-        assertNull(app.getStatsCollectorFactory());
+        assertNull(node.getSerializer());
+        assertNotNull(cd.getRoutingStrategy());
+        assertNull(node.getStatsCollector());
     }
 
     @Test
-    public void testSimpleConfigTopology() throws Throwable {
-        final ApplicationDefinition app = new Topology("test").add("test-slot", new MessageProcessor(new GoodTestMp())).app();
+    public void testSimpleConfigBuilder() throws Throwable {
+        final Node node = new Node("test").setDefaultRoutingStrategy(new Object());
+        final Cluster cd = node.cluster("test-slot").mp(new MessageProcessor(new GoodTestMp()));
 
         // if we get to here without an error we should be okay
-        app.validate(); // this throws if there's a problem.
+        node.validate(); // this throws if there's a problem.
 
-        assertNull(app.getSerializer());
-
-        assertNull(app.getRoutingStrategy());
-
-        assertNull(app.getClusterDefinition("test-slot").getStatsCollectorFactory());
-        assertNull(app.getStatsCollectorFactory());
+        assertNull(node.getSerializer());
+        assertNotNull(cd.getRoutingStrategy());
+        assertNull(node.getStatsCollector());
     }
 
     @Test
     public void testConfig() throws Throwable {
-        final List<ClusterDefinition> clusterDefs = new ArrayList<ClusterDefinition>();
+        final List<Cluster> clusterDefs = new ArrayList<Cluster>();
 
-        Object appSer;
+        Serializer appSer;
         Object appRs;
-        Object appScf;
-        final ApplicationDefinition app = new ApplicationDefinition("test").setSerializer(appSer = new Object())
-                .setRoutingStrategy(appRs = new Object())
-                .setStatsCollectorFactory(appScf = new Object());
+        Object appSc;
+        final Node node = new Node("test").serializer(appSer = new JavaSerializer())
+                .setStatsCollector(appSc = new Object()).setDefaultRoutingStrategy(appRs = new Object());
 
-        ClusterDefinition cd = new ClusterDefinition("test-slot1").setAdaptor(new GoodAdaptor());
+        Cluster cd = new Cluster("test-slot1").setAdaptor(new GoodAdaptor());
         clusterDefs.add(cd);
 
-        cd = new ClusterDefinition("test-slot2", new MessageProcessor(new GoodTestMp()))
+        cd = new Cluster("test-slot2").mp(new MessageProcessor(new GoodTestMp()))
                 .setDestinations(new ClusterId(new ClusterId("test", "test-slot3")));
         clusterDefs.add(cd);
 
-        cd = new ClusterDefinition("test-slot3");
+        cd = new Cluster("test-slot3");
         cd.setMessageProcessor(new MessageProcessor(new GoodTestMp()));
         cd.setDestinations(new ClusterId[] { new ClusterId("test", "test-slot4"), new ClusterId("test", "test-slot5") });
         clusterDefs.add(cd);
 
-        cd = new ClusterDefinition("test-slot4").setMessageProcessor(new MessageProcessor(new GoodTestMp()));
+        cd = new Cluster("test-slot4").setMessageProcessor(new MessageProcessor(new GoodTestMp()));
         clusterDefs.add(cd);
 
-        cd = new ClusterDefinition("test-slot5").setMessageProcessor(new MessageProcessor(new GoodTestMp()));
+        cd = new Cluster("test-slot5").setMessageProcessor(new MessageProcessor(new GoodTestMp()));
         clusterDefs.add(cd);
 
-        Object clusScf;
-        cd = new ClusterDefinition("test-slot6").setMessageProcessor(new MessageProcessor(new GoodTestMp()))
-                .setStatsCollectorFactory(clusScf = new Object());
+        final Object clusRs = new Object();
+        cd = new Cluster("test-slot6").setMessageProcessor(new MessageProcessor(new GoodTestMp()))
+                .setRoutingStrategy(clusRs);
         clusterDefs.add(cd);
 
-        cd = new ClusterDefinition("test-slot1.5", new GoodAdaptor());
+        cd = new Cluster("test-slot1.5").adaptor(new GoodAdaptor());
         assertNotNull(cd.getAdaptor());
         clusterDefs.add(cd);
 
-        app.setClusterDefinitions(clusterDefs);
+        node.setClusters(clusterDefs);
 
         // if we get to here without an error we should be okay
-        app.validate(); // this throws if there's a problem.
+        node.validate(); // this throws if there's a problem.
 
-        assertTrue(app.getClusterDefinitions().get(0).isRouteAdaptorType());
-        assertEquals(new ClusterId("test", "test-slot2"), app.getClusterDefinitions().get(1).getClusterId());
-        assertEquals("test", app.getClusterDefinitions().get(1).getClusterId().applicationName);
-        assertEquals("test-slot2", app.getClusterDefinitions().get(1).getClusterId().clusterName);
-        assertEquals(new ClusterId("test", "test-slot2").hashCode(), app.getClusterDefinitions().get(1).getClusterId().hashCode());
+        assertTrue(node.getClusters().get(0).isAdaptor());
+        assertEquals(new ClusterId("test", "test-slot2"), node.getClusters().get(1).getClusterId());
+        assertEquals("test", node.getClusters().get(1).getClusterId().applicationName);
+        assertEquals("test-slot2", node.getClusters().get(1).getClusterId().clusterName);
+        assertEquals(new ClusterId("test", "test-slot2").hashCode(), node.getClusters().get(1).getClusterId().hashCode());
         assertFalse(new ClusterId("test", "test-slot3").equals(new Object()));
         assertFalse(new ClusterId("test", "test-slot3").equals(null));
 
-        assertEquals(appSer, app.getSerializer());
+        assertEquals(appSer, node.getSerializer());
 
-        assertEquals(appRs, app.getRoutingStrategy());
+        assertEquals(appRs, node.getDefaultRoutingStrategy());
 
-        assertEquals(appScf, app.getClusterDefinitions().get(0).getStatsCollectorFactory());
-        assertEquals(app.getStatsCollectorFactory(), app.getClusterDefinitions().get(1).getStatsCollectorFactory());
-        assertEquals(clusScf, app.getClusterDefinitions().get(5).getStatsCollectorFactory());
+        assertEquals(clusRs, node.getClusters().get(5).getRoutingStrategy());
 
-        assertTrue(app == app.getClusterDefinitions().get(4).getParentApplicationDefinition());
-
-        assertEquals(new ClusterId("test", "test-slot1"), app.getClusterDefinitions().get(0).getClusterId());
+        assertEquals(new ClusterId("test", "test-slot1"), node.getClusters().get(0).getClusterId());
+        assertEquals(appSc, node.getStatsCollector());
     }
 
     @Test
-    public void testConfigTopology() throws Throwable {
+    public void testConfigBuilder() throws Throwable {
 
-        Object appSer;
+        Serializer appSer;
         final Object appRs;
         Object appScf;
-        Object clusScf;
-        final ApplicationDefinition app = new Topology("test")
-                .serializer(appSer = new Object())
-                .routing(appRs = new Object())
-                .statsCollector(appScf = new Object())
-                .add("test-slot1", new GoodAdaptor())
-                .add(new CdBuild("test-slot2").prototype(new GoodTestMp()).downstream("test-slot3").cd())
-                .add(new CdBuild("test-slot3").prototype(new GoodTestMp()).downstream("test-slot4", "test-slot5").cd())
-                .add(new CdBuild("test-slot4", new GoodTestMp()).cd())
-                .add(new CdBuild("test-slot5", new GoodTestMp()).cd())
-                .add(new CdBuild("test-slot6", new GoodTestMp()).statsCollector(clusScf = new Object()).cd())
-                .add("test-slot1.5", new GoodAdaptor())
-                .app();
+        Object clusRs;
+        final Node app = new Node("test")
+                .serializer(appSer = new JavaSerializer())
+                .defaultRoutingStrategy(appRs = new Object())
+                .statsCollector(appScf = new Object());
 
-        assertNotNull(app.getClusterDefinition("test-slot1.5").getAdaptor());
+        app.cluster("test-slot1").adaptor(new GoodAdaptor());
+        app.cluster("test-slot2").mp(new MessageProcessor(new GoodTestMp())).destination("test-slot3");
+        app.cluster("test-slot3").mp(new MessageProcessor(new GoodTestMp())).destination("test-slot4", "test-slot5");
+        app.cluster("test-slot4").mp(new MessageProcessor(new GoodTestMp()));
+        app.cluster("test-slot5").mp(new MessageProcessor(new GoodTestMp()));
+        app.cluster("test-slot6").mp(new MessageProcessor(new GoodTestMp())).routing(clusRs = new Object());
+        app.cluster("test-slot1.5").adaptor(new GoodAdaptor());
+
+        assertNotNull(app.getCluster(new ClusterId("test", "test-slot1.5")).getAdaptor());
+        assertNotNull(app.getCluster("test-slot1.5").getAdaptor());
 
         // if we get to here without an error we should be okay
         app.validate(); // this throws if there's a problem.
 
-        assertTrue(app.getClusterDefinitions().get(0).isRouteAdaptorType());
-        assertEquals(new ClusterId("test", "test-slot2"), app.getClusterDefinitions().get(1).getClusterId());
-        assertEquals("test", app.getClusterDefinitions().get(1).getClusterId().applicationName);
-        assertEquals("test-slot2", app.getClusterDefinitions().get(1).getClusterId().clusterName);
-        assertEquals(new ClusterId("test", "test-slot2").hashCode(), app.getClusterDefinitions().get(1).getClusterId().hashCode());
+        assertTrue(app.getClusters().get(0).isAdaptor());
+        assertEquals(new ClusterId("test", "test-slot2"), app.getClusters().get(1).getClusterId());
+        assertEquals("test", app.getClusters().get(1).getClusterId().applicationName);
+        assertEquals("test-slot2", app.getClusters().get(1).getClusterId().clusterName);
+        assertEquals(new ClusterId("test", "test-slot2").hashCode(), app.getClusters().get(1).getClusterId().hashCode());
         assertFalse(new ClusterId("test", "test-slot3").equals(new Object()));
         assertFalse(new ClusterId("test", "test-slot3").equals(null));
 
         assertEquals(appSer, app.getSerializer());
 
-        assertEquals(appRs, app.getRoutingStrategy());
+        assertEquals(appRs, app.getDefaultRoutingStrategy());
 
-        assertEquals(appScf, app.getClusterDefinitions().get(0).getStatsCollectorFactory());
-        assertEquals(app.getStatsCollectorFactory(), app.getClusterDefinitions().get(1).getStatsCollectorFactory());
-        assertEquals(clusScf, app.getClusterDefinitions().get(5).getStatsCollectorFactory());
+        assertEquals(clusRs, app.getClusters().get(5).getRoutingStrategy());
 
-        assertTrue(app == app.getClusterDefinitions().get(4).getParentApplicationDefinition());
+        assertEquals(new ClusterId("test", "test-slot1"), app.getClusters().get(0).getClusterId());
 
-        assertEquals(new ClusterId("test", "test-slot1"), app.getClusterDefinitions().get(0).getClusterId());
+        assertEquals(appScf, app.getStatsCollector());
     }
 
     @Test(expected = IllegalStateException.class)
     public void testFailNoPrototypeOrAdaptor() throws Throwable {
-        final ApplicationDefinition app = new ApplicationDefinition("test");
-        final ClusterDefinition cd = new ClusterDefinition("test-slot1");
-        app.add(cd); // no prototype or adaptor
+        final Node app = new Node("test");
+        final Cluster cd = new Cluster("test-slot1");
+        app.setClusters(cd); // no prototype or adaptor
         app.validate();
     }
 
     @Test(expected = IllegalStateException.class)
-    public void testFailNoPrototypeOrAdaptorTopology() throws Throwable {
-        new Topology("test").add(new CdBuild("test-slot1").cd()).app();
-    }
-
-    @Test(expected = IllegalStateException.class)
-    public void testFailBadPrototype() throws Throwable {
-        final ApplicationDefinition app = new ApplicationDefinition("test");
-        final ClusterDefinition cd = new ClusterDefinition("test-slot1");
-        cd.setMessageProcessor(new MessageProcessor(new Object())); // has no annotated methods
-        app.add(cd);
-    }
-
-    @Test(expected = IllegalStateException.class)
-    public void testFailBadPrototypeTopology() throws Throwable {
-        new Topology("test").add(new CdBuild("test-slot1", new Object()).cd()).app();
+    public void testFailNoPrototypeOrAdaptorBuilder() throws Throwable {
+        final Node node = new Node("test");
+        node.cluster("test-slot1");
+        node.validate();
     }
 
     @Test(expected = IllegalStateException.class)
     public void testFailBothPrototypeAndAdaptor() throws Throwable {
-        final ApplicationDefinition app = new ApplicationDefinition("test");
-        final ClusterDefinition cd = new ClusterDefinition("test-slot1");
+        final Cluster cd = new Cluster("test-slot1");
         cd.setMessageProcessor(new MessageProcessor(new GoodTestMp()));
         cd.setAdaptor(new GoodAdaptor());
-        app.add(cd);
-        app.validate();
     }
 
     @Test(expected = IllegalStateException.class)
-    public void testFailBothPrototypeAndAdaptorTopology() throws Throwable {
-        new Topology("test").add(new CdBuild("test-slot1").prototype(new GoodTestMp()).adaptor(new GoodAdaptor()).cd()).app();
+    public void testFailBothPrototypeAndAdaptorBuilder() throws Throwable {
+        final Node node = new Node("test");
+        node.cluster("test-slot1").mp(new MessageProcessor(new GoodTestMp())).adaptor(new GoodAdaptor());
     }
 
     @Test(expected = IllegalArgumentException.class)
     public void testFailNullClusterDefinition() throws Throwable {
-        new ApplicationDefinition("test").add(
-                new ClusterDefinition("test-slot1").setMessageProcessor(new MessageProcessor(new GoodTestMp())),
+        final Node node = new Node("test");
+        node.setClusters(new Cluster("test-slot1").setMessageProcessor(new MessageProcessor(new GoodTestMp())),
                 null,
-                new ClusterDefinition("test-slot2").setMessageProcessor(new MessageProcessor(new GoodTestMp())));
+                new Cluster("test-slot2").setMessageProcessor(new MessageProcessor(new GoodTestMp())));
     }
 
     @Test(expected = IllegalArgumentException.class)
-    public void testFailNullClusterDefinitionTopology() throws Throwable {
-        new Topology("test").add("slot1", new MessageProcessor(new GoodTestMp()))
-                .add(null)
-                .add(new CdBuild("slot2", new GoodTestMp()).cd()).app();
-    }
-
-    @Test(expected = IllegalStateException.class)
-    public void testFailNoParent() throws Throwable {
-        new ClusterDefinition("test-slot1").setMessageProcessor(new MessageProcessor(new GoodTestMp())).validate();
-    }
-
-    @Test(expected = IllegalStateException.class)
-    public void testFailNoParentTopology() throws Throwable {
-        new CdBuild("jnk", new GoodTestMp()).cd().validate();
+    public void testFailNoClusterDefinition() throws Throwable {
+        final Node node = new Node("test");
+        node.setClusters();
     }
 
     @Test(expected = IllegalStateException.class)
     public void testDupCluster() throws Throwable {
-        final ApplicationDefinition app = new ApplicationDefinition("test-tooMuchWine-needMore").add(
-                new ClusterDefinition("notTheSame").setAdaptor(new GoodAdaptor()),
-                new ClusterDefinition("mp-stage1").setMessageProcessor(new MessageProcessor(new GoodTestMp())),
-                new ClusterDefinition("mp-stage2-dupped").setMessageProcessor(new MessageProcessor(new GoodTestMp())),
-                new ClusterDefinition("mp-stage2-dupped").setMessageProcessor(new MessageProcessor(new GoodTestMp())),
-                new ClusterDefinition("mp-stage3").setMessageProcessor(new MessageProcessor(new GoodTestMp())));
+        final Node app = new Node("test-tooMuchWine-needMore").setDefaultRoutingStrategy(new Object());
+        app.setClusters(
+                new Cluster("notTheSame").setAdaptor(new GoodAdaptor()),
+                new Cluster("mp-stage1").setMessageProcessor(new MessageProcessor(new GoodTestMp())),
+                new Cluster("mp-stage2-dupped").setMessageProcessor(new MessageProcessor(new GoodTestMp())),
+                new Cluster("mp-stage2-dupped").setMessageProcessor(new MessageProcessor(new GoodTestMp())),
+                new Cluster("mp-stage3").setMessageProcessor(new MessageProcessor(new GoodTestMp())));
         app.validate();
     }
 
     @Test(expected = IllegalStateException.class)
-    public void testDupClusterTopology() throws Throwable {
-        new Topology("test-tooMuchWine-needMore").add("notTheSame", new GoodAdaptor())
-                .add(new CdBuild("mp-stage1", new GoodTestMp()).cd())
-                .add(new CdBuild("mp-stage2-dupped", new GoodTestMp()).cd())
-                .add(new CdBuild("mp-stage2-dupped", new GoodTestMp()).cd())
-                .add(new CdBuild("mp-stage3", new GoodTestMp()).cd()).app();
-    }
-
-    @Test(expected = IllegalStateException.class)
-    public void testMultipleStartMethodsDisallowed() throws Throwable {
-        final ApplicationDefinition app = new ApplicationDefinition("test-multiple-starts").add(
-                new ClusterDefinition("adaptor").setAdaptor(new GoodAdaptor()),
-                new ClusterDefinition("good-mp").setMessageProcessor(new MessageProcessor(new GoodTestMp())),
-                new ClusterDefinition("bad-mp").setMessageProcessor(new MessageProcessor(new MultiStartTestMp())));
-        app.validate();
-    }
-
-    @Test(expected = IllegalStateException.class)
-    public void testMultipleStartMethodsDisallowedTopology() throws Throwable {
-        new Topology("test-multiple-starts").add("adaptor", new GoodAdaptor())
-                .add(new CdBuild("good-mp", new GoodTestMp()).cd())
-                .add(new CdBuild("bad-mp", new MultiStartTestMp()).cd()).app();
+    public void testDupClusterBuilder() throws Throwable {
+        final Node node = new Node("test-tooMuchWine-needMore").defaultRoutingStrategy(new Object());
+        node.cluster("notTheSame").adaptor(new GoodAdaptor());
+        node.cluster("mp-stage1").mp(new MessageProcessor(new GoodTestMp()));
+        node.cluster("mp-stage2-dupped").mp(new MessageProcessor(new GoodTestMp()));
+        node.cluster("mp-stage2-dupped").mp(new MessageProcessor(new GoodTestMp()));
+        node.cluster("mp-stage3").mp(new MessageProcessor(new GoodTestMp()));
+        node.validate();
     }
 
     @Test
     public void testSimpleConfigWithKeyStore() throws Throwable {
-        final ApplicationDefinition app = new ApplicationDefinition("test");
-        final ClusterDefinition cd = new ClusterDefinition("test-slot");
+        final Node app = new Node("test").defaultRoutingStrategy(new Object());
+        final Cluster cd = new Cluster("test-slot");
         cd.setMessageProcessor(new MessageProcessor(new GoodTestMp()));
         cd.setKeySource(new KeySource<Object>() {
             @Override
@@ -347,25 +302,27 @@ public class TestConfig {
                 return null;
             }
         });
-        app.add(cd);
+        app.setClusters(cd);
         app.validate();
     }
 
     @Test
-    public void testSimpleConfigWithKeyStoreTopology() throws Throwable {
-        new Topology("test").add(new CdBuild("test-slot", new GoodTestMp())
+    public void testSimpleConfigWithKeyStoreBuilder() throws Throwable {
+        final Node node = new Node("test").defaultRoutingStrategy(new Object());
+        node.cluster("test-slot").mp(new MessageProcessor(new GoodTestMp()))
                 .keySource(new KeySource<Object>() {
                     @Override
                     public Iterable<Object> getAllPossibleKeys() {
                         return null;
                     }
-                }).cd()).app();
+                });
+        node.validate();
     }
 
     @Test(expected = IllegalStateException.class)
     public void testConfigAdaptorWithKeyStore() throws Throwable {
-        final ApplicationDefinition app = new ApplicationDefinition("test");
-        final ClusterDefinition cd = new ClusterDefinition("test-slot");
+        final Node app = new Node("test").defaultRoutingStrategy(new Object());
+        final Cluster cd = new Cluster("test-slot");
         cd.setAdaptor(new Adaptor() {
             @Override
             public void stop() {}
@@ -375,205 +332,41 @@ public class TestConfig {
 
             @Override
             public void setDispatcher(final Dispatcher dispatcher) {}
-        })
-                .setKeySource(new KeySource<Object>() {
-                    @Override
-                    public Iterable<Object> getAllPossibleKeys() {
-                        return null;
-                    }
-                });
-        app.add(cd);
-        app.validate();
-    }
-
-    @Test(expected = IllegalStateException.class)
-    public void testConfigAdaptorWithKeyStoreTopology() throws Throwable {
-        new Topology("test")
-                .add(new CdBuild("test-slot").adaptor(new Adaptor() {
-                    @Override
-                    public void stop() {}
-
-                    @Override
-                    public void start() {}
-
-                    @Override
-                    public void setDispatcher(final Dispatcher dispatcher) {}
-                }).keySource(new KeySource<Object>() {
-                    @Override
-                    public Iterable<Object> getAllPossibleKeys() {
-                        return null;
-                    }
-                }).cd()).app();
-    }
-
-    @Test(expected = IllegalStateException.class)
-    public void testConfigMpWithMultipleEvict() throws Throwable {
-        final ApplicationDefinition app = new ApplicationDefinition("test");
-        final ClusterDefinition cd = new ClusterDefinition("test-slot");
-
-        @Mp
-        class mp implements Cloneable {
-            @MessageHandler
-            public void handle(final GoodMessage string) {}
-
-            @Start
-            public void startMethod() {}
-
-            @Evictable
-            public boolean evict2() {
-                return false;
-            }
-
-            @Evictable
-            public boolean evict1() {
-                return false;
-            }
-
+        }).setKeySource(new KeySource<Object>() {
             @Override
-            public Object clone() throws CloneNotSupportedException {
-                return super.clone();
-            }
-
-        }
-
-        cd.setMessageProcessor(new MessageProcessor(new mp()));
-        app.add(cd);
-        app.validate();
-    }
-
-    @Test(expected = IllegalStateException.class)
-    public void testConfigMpWithMultipleEvictTopology() throws Throwable {
-        @Mp
-        class mp implements Cloneable {
-            @MessageHandler
-            public void handle(final GoodMessage string) {}
-
-            @Start
-            public void startMethod() {}
-
-            @Evictable
-            public boolean evict2() {
-                return false;
-            }
-
-            @Evictable
-            public boolean evict1() {
-                return false;
-            }
-
-            @Override
-            public Object clone() throws CloneNotSupportedException {
-                return super.clone();
-            }
-        }
-
-        new Topology("test").add(new CdBuild("slot", new mp()).cd()).app();
-    }
-
-    @Test(expected = IllegalStateException.class)
-    public void testConfigMpWithWrongReturnTypeEvict1() throws Throwable {
-        final ApplicationDefinition app = new ApplicationDefinition("test");
-        final ClusterDefinition cd = new ClusterDefinition("test-slot");
-
-        @Mp
-        class mp implements Cloneable {
-            @MessageHandler
-            public void handle(final GoodMessage string) {}
-
-            @Start
-            public void startMethod() {}
-
-            @Evictable
-            public void evict1() {}
-
-            @Override
-            public Object clone() throws CloneNotSupportedException {
-                return super.clone();
-            }
-        }
-
-        cd.setMessageProcessor(new MessageProcessor(new mp()));
-        app.add(cd);
-        app.validate();
-    }
-
-    @Test(expected = IllegalStateException.class)
-    public void testConfigMpWithWrongReturnTypeEvict1Topology() throws Throwable {
-        @Mp
-        class mp implements Cloneable {
-            @MessageHandler
-            public void handle(final GoodMessage string) {}
-
-            @Start
-            public void startMethod() {}
-
-            @Evictable
-            public void evict1() {}
-
-            @Override
-            public Object clone() throws CloneNotSupportedException {
-                return super.clone();
-            }
-        }
-        new Topology("test").add(new CdBuild("slot", new mp()).cd()).app();
-    }
-
-    @Test(expected = IllegalStateException.class)
-    public void testConfigMpWithWrongReturnTypeEvict2() throws Throwable {
-        final ApplicationDefinition app = new ApplicationDefinition("test");
-        final ClusterDefinition cd = new ClusterDefinition("test-slot");
-
-        @Mp
-        class mp implements Cloneable {
-            @MessageHandler
-            public void handle(final GoodMessage string) {}
-
-            @Start
-            public void startMethod() {}
-
-            @Evictable
-            public Object evict1() {
+            public Iterable<Object> getAllPossibleKeys() {
                 return null;
             }
-
-            @Override
-            public Object clone() throws CloneNotSupportedException {
-                return super.clone();
-            }
-        }
-
-        cd.setMessageProcessor(new MessageProcessor(new mp()));
-        app.add(cd);
+        });
+        app.setClusters(cd);
         app.validate();
     }
 
     @Test(expected = IllegalStateException.class)
-    public void testConfigMpWithWrongReturnTypeEvict2Topology() throws Throwable {
-        @Mp
-        class mp implements Cloneable {
-            @MessageHandler
-            public void handle(final GoodMessage string) {}
-
-            @Start
-            public void startMethod() {}
-
-            @Evictable
-            public Object evict1() {
-                return null;
-            }
+    public void testConfigAdaptorWithKeyStoreBuilder() throws Throwable {
+        final Node node = new Node("test").defaultRoutingStrategy(new Object());
+        node.cluster("test-slot").adaptor(new Adaptor() {
+            @Override
+            public void stop() {}
 
             @Override
-            public Object clone() throws CloneNotSupportedException {
-                return super.clone();
+            public void start() {}
+
+            @Override
+            public void setDispatcher(final Dispatcher dispatcher) {}
+        }).keySource(new KeySource<Object>() {
+            @Override
+            public Iterable<Object> getAllPossibleKeys() {
+                return null;
             }
-        }
-        new Topology("test").add(new CdBuild("slot", new mp()).cd()).app();
+        });
+        node.validate();
     }
 
     @Test
     public void testConfigMpWithGoodMPEvict() throws Throwable {
-        final ApplicationDefinition app = new ApplicationDefinition("test");
-        final ClusterDefinition cd = new ClusterDefinition("test-slot");
+        final Node app = new Node("test").defaultRoutingStrategy(new Object());
+        final Cluster cd = new Cluster("test-slot");
 
         @Mp
         class mp implements Cloneable {
@@ -595,12 +388,12 @@ public class TestConfig {
         }
 
         cd.setMessageProcessor(new MessageProcessor(new mp()));
-        app.add(cd);
+        app.setClusters(cd);
         app.validate();
     }
 
     @Test
-    public void testConfigMpWithGoodMPEvictTopology() throws Throwable {
+    public void testConfigMpWithGoodMPEvictBuilder() throws Throwable {
 
         @Mp
         class mp implements Cloneable {
@@ -621,8 +414,210 @@ public class TestConfig {
             }
         }
 
-        new Topology("test").add(new CdBuild("slot", new mp()).cd()).app();
-
+        final Node node = new Node("test").setDefaultRoutingStrategy(new Object());
+        node.cluster("slot").mp(new MessageProcessor(new mp()));
+        node.validate();
     }
 
+    // TODO:
+    // =================================================================
+    // These need to be moved to an annotation MessageProcessor test
+    //
+    // @Test(expected = IllegalStateException.class)
+    // public void testFailBadPrototype() throws Throwable {
+    // final Node app = new Node("test");
+    // final ClusterDefinition cd = new ClusterDefinition("test-slot1");
+    // cd.setMessageProcessor(new MessageProcessor(new Object())); // has no annotated methods
+    // app.setClusters(cd);
+    // app.validate();
+    // }
+    //
+    // @Test(expected = IllegalStateException.class)
+    // public void testFailBadPrototypeBuilder() throws Throwable {
+    // final Node node = new Node("test");
+    // node.cluster("test-slot1").mp(new MessageProcessor(new Object()));
+    // node.validate();
+    // }
+    //
+    //
+    //
+    // @Test(expected = IllegalStateException.class)
+    // public void testMultipleStartMethodsDisallowed() throws Throwable {
+    // final ApplicationDefinition app = new ApplicationDefinition("test-multiple-starts").add(
+    // new ClusterDefinition("adaptor").setAdaptor(new GoodAdaptor()),
+    // new ClusterDefinition("good-mp").setMessageProcessor(new MessageProcessor(new GoodTestMp())),
+    // new ClusterDefinition("bad-mp").setMessageProcessor(new MessageProcessor(new MultiStartTestMp())));
+    // app.validate();
+    // }
+    //
+    // @Test(expected = IllegalStateException.class)
+    // public void testMultipleStartMethodsDisallowedTopology() throws Throwable {
+    // new Node("test-multiple-starts").add("adaptor", new GoodAdaptor())
+    // .add(new CdBuild("good-mp", new GoodTestMp()).cd())
+    // .add(new CdBuild("bad-mp", new MultiStartTestMp()).cd()).app();
+    // }
+    //
+    // @Test(expected = IllegalStateException.class)
+    // public void testConfigMpWithMultipleEvict() throws Throwable {
+    // final ApplicationDefinition app = new ApplicationDefinition("test");
+    // final ClusterDefinition cd = new ClusterDefinition("test-slot");
+    //
+    // @Mp
+    // class mp implements Cloneable {
+    // @MessageHandler
+    // public void handle(final GoodMessage string) {}
+    //
+    // @Start
+    // public void startMethod() {}
+    //
+    // @Evictable
+    // public boolean evict2() {
+    // return false;
+    // }
+    //
+    // @Evictable
+    // public boolean evict1() {
+    // return false;
+    // }
+    //
+    // @Override
+    // public Object clone() throws CloneNotSupportedException {
+    // return super.clone();
+    // }
+    //
+    // }
+    //
+    // cd.setMessageProcessor(new MessageProcessor(new mp()));
+    // app.add(cd);
+    // app.validate();
+    // }
+    //
+    // @Test(expected = IllegalStateException.class)
+    // public void testConfigMpWithMultipleEvictTopology() throws Throwable {
+    // @Mp
+    // class mp implements Cloneable {
+    // @MessageHandler
+    // public void handle(final GoodMessage string) {}
+    //
+    // @Start
+    // public void startMethod() {}
+    //
+    // @Evictable
+    // public boolean evict2() {
+    // return false;
+    // }
+    //
+    // @Evictable
+    // public boolean evict1() {
+    // return false;
+    // }
+    //
+    // @Override
+    // public Object clone() throws CloneNotSupportedException {
+    // return super.clone();
+    // }
+    // }
+    //
+    // new Node("test").add(new CdBuild("slot", new mp()).cd()).app();
+    // }
+    //
+    // @Test(expected = IllegalStateException.class)
+    // public void testConfigMpWithWrongReturnTypeEvict1() throws Throwable {
+    // final ApplicationDefinition app = new ApplicationDefinition("test");
+    // final ClusterDefinition cd = new ClusterDefinition("test-slot");
+    //
+    // @Mp
+    // class mp implements Cloneable {
+    // @MessageHandler
+    // public void handle(final GoodMessage string) {}
+    //
+    // @Start
+    // public void startMethod() {}
+    //
+    // @Evictable
+    // public void evict1() {}
+    //
+    // @Override
+    // public Object clone() throws CloneNotSupportedException {
+    // return super.clone();
+    // }
+    // }
+    //
+    // cd.setMessageProcessor(new MessageProcessor(new mp()));
+    // app.add(cd);
+    // app.validate();
+    // }
+    //
+    // @Test(expected = IllegalStateException.class)
+    // public void testConfigMpWithWrongReturnTypeEvict1Topology() throws Throwable {
+    // @Mp
+    // class mp implements Cloneable {
+    // @MessageHandler
+    // public void handle(final GoodMessage string) {}
+    //
+    // @Start
+    // public void startMethod() {}
+    //
+    // @Evictable
+    // public void evict1() {}
+    //
+    // @Override
+    // public Object clone() throws CloneNotSupportedException {
+    // return super.clone();
+    // }
+    // }
+    // new Node("test").add(new CdBuild("slot", new mp()).cd()).app();
+    // }
+    //
+    // @Test(expected = IllegalStateException.class)
+    // public void testConfigMpWithWrongReturnTypeEvict2() throws Throwable {
+    // final ApplicationDefinition app = new ApplicationDefinition("test");
+    // final ClusterDefinition cd = new ClusterDefinition("test-slot");
+    //
+    // @Mp
+    // class mp implements Cloneable {
+    // @MessageHandler
+    // public void handle(final GoodMessage string) {}
+    //
+    // @Start
+    // public void startMethod() {}
+    //
+    // @Evictable
+    // public Object evict1() {
+    // return null;
+    // }
+    //
+    // @Override
+    // public Object clone() throws CloneNotSupportedException {
+    // return super.clone();
+    // }
+    // }
+    //
+    // cd.setMessageProcessor(new MessageProcessor(new mp()));
+    // app.add(cd);
+    // app.validate();
+    // }
+    //
+    // @Test(expected = IllegalStateException.class)
+    // public void testConfigMpWithWrongReturnTypeEvict2Topology() throws Throwable {
+    // @Mp
+    // class mp implements Cloneable {
+    // @MessageHandler
+    // public void handle(final GoodMessage string) {}
+    //
+    // @Start
+    // public void startMethod() {}
+    //
+    // @Evictable
+    // public Object evict1() {
+    // return null;
+    // }
+    //
+    // @Override
+    // public Object clone() throws CloneNotSupportedException {
+    // return super.clone();
+    // }
+    // }
+    // new Node("test").add(new CdBuild("slot", new mp()).cd()).app();
+    // }
 }

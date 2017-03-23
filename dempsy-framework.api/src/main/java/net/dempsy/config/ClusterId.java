@@ -19,7 +19,7 @@ package net.dempsy.config;
 /**
  * <p>
  * This class represents the Id of a message processor cluster within a Dempsy application. Cluster Id's are essentially a two level name: application name, cluster name, and they correspond to the
- * {@link ApplicationDefinition}'s applicationName and the {@link ClusterDefinition}'s clusterName.
+ * {@link ApplicationDefinition}'s applicationName and the {@link Cluster}'s clusterName.
  * </p>
  * 
  * <p>

@@ -16,23 +16,34 @@
 
 package net.dempsy.lifecycle.annotations;
 
+import static net.dempsy.util.Functional.recheck;
+import static net.dempsy.util.Functional.uncheck;
+
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
-import java.util.Arrays;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Iterator;
+import java.util.List;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
-import net.dempsy.config.ClusterDefinition;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.MarkerFactory;
+
+import net.dempsy.config.Cluster;
 import net.dempsy.config.ClusterId;
 import net.dempsy.lifecycle.annotations.internal.AnnotatedMethodInvoker;
-import net.dempsy.messages.Adaptor;
-import net.dempsy.messages.KeySource;
 import net.dempsy.messages.MessageProcessorLifecycle;
 import net.dempsy.util.SafeString;
 
 /**
  * This class holds the MP prototype, and supports invocation of MP methods on an instance.
  */
-public class MessageProcessor implements MessageProcessorLifecycle {
+public class MessageProcessor<T> implements MessageProcessorLifecycle<T> {
+    private static Logger logger = LoggerFactory.getLogger(MessageProcessor.class);
+
     private final Object prototype;
     private final Class<?> mpClass;
     private final String mpClassName;
@@ -42,11 +53,14 @@ public class MessageProcessor implements MessageProcessorLifecycle {
     private final Method cloneMethod;
     private MethodHandle activationMethod;
     private final MethodHandle passivationMethod;
-    private final Method outputMethod;
+    private final List<Method> outputMethods;
     private final MethodHandle evictableMethod;
     private final AnnotatedMethodInvoker invocationMethods;
+    private final Set<Class<?>> stopTryingToSendTheseTypes = Collections.newSetFromMap(new ConcurrentHashMap<Class<?>, Boolean>());
 
-    public MessageProcessor(final Object prototype) {
+    private static final AnnotatedMethodInvoker messageKeyGetMethodInvoker = new AnnotatedMethodInvoker(MessageKey.class);
+
+    public MessageProcessor(final T prototype) throws IllegalArgumentException {
         this.prototype = prototype;
         this.mpClass = prototype.getClass();
         this.mpClassName = mpClass.getName();
@@ -63,55 +77,8 @@ public class MessageProcessor implements MessageProcessorLifecycle {
                     (messageKey == null) ? null : messageKey.getReturnType());
         }
         passivationMethod = new MethodHandle(AnnotatedMethodInvoker.introspectAnnotationSingle(mpClass, Passivation.class));
-        outputMethod = AnnotatedMethodInvoker.introspectAnnotationSingle(mpClass, Output.class);
+        outputMethods = AnnotatedMethodInvoker.introspectAnnotationMultiple(mpClass, Output.class);
         evictableMethod = new MethodHandle(AnnotatedMethodInvoker.introspectAnnotationSingle(mpClass, Evictable.class));
-    }
-
-    public static class CdBuild {
-        private final ClusterDefinition cd;
-
-        public CdBuild(final String clusterName) {
-            cd = new ClusterDefinition(clusterName);
-        }
-
-        public CdBuild(final String clusterName, final Object mp) {
-            this(clusterName);
-            prototype(mp);
-        }
-
-        public CdBuild(final String clusterName, final Adaptor mp) {
-            this(clusterName);
-            adaptor(mp);
-        }
-
-        public CdBuild prototype(final Object mp) {
-            cd.setMessageProcessor(new MessageProcessor(mp));
-            return this;
-        }
-
-        public CdBuild adaptor(final Adaptor adaptor) {
-            cd.setAdaptor(adaptor);
-            return this;
-        }
-
-        public CdBuild downstream(final String... downstreamClusterNames) {
-            Arrays.stream(downstreamClusterNames).forEach(cn -> cd.setDestinations(new ClusterId(null, cn)));
-            return this;
-        }
-
-        public CdBuild statsCollector(final Object statsCollector) {
-            cd.setStatsCollectorFactory(statsCollector);
-            return this;
-        }
-
-        public CdBuild keySource(final KeySource<?> keySource) {
-            cd.setKeySource(keySource);
-            return this;
-        }
-
-        public ClusterDefinition cd() {
-            return cd;
-        }
     }
 
     /**
@@ -126,10 +93,9 @@ public class MessageProcessor implements MessageProcessorLifecycle {
      * Invokes the activation method of the passed instance.
      */
     @Override
-    public boolean activate(final Object instance, final Object key, final byte[] activationData)
+    public void activate(final T instance, final Object key, final byte[] activationData)
             throws IllegalArgumentException, IllegalAccessException, InvocationTargetException {
-        final Object o = activationMethod.invoke(instance, key, activationData);
-        return o == null ? true : ((Boolean) o);
+        activationMethod.invoke(instance, key, activationData);
     }
 
     /**
@@ -147,7 +113,7 @@ public class MessageProcessor implements MessageProcessorLifecycle {
      * @throws IllegalArgumentException
      */
     @Override
-    public byte[] passivate(final Object instance) throws IllegalArgumentException, IllegalAccessException, InvocationTargetException {
+    public byte[] passivate(final T instance) throws IllegalArgumentException, IllegalAccessException, InvocationTargetException {
         return (byte[]) passivationMethod.invoke(instance);
     }
 
@@ -160,33 +126,24 @@ public class MessageProcessor implements MessageProcessorLifecycle {
      * @throws IllegalArgumentException
      */
     @Override
-    public Object invoke(final Object instance, final Object message)
+    public KeyedMessage[] invoke(final T instance, final Object message)
             throws IllegalArgumentException, IllegalAccessException, InvocationTargetException {
-        final Class<?> messageClass = message.getClass();
-        if (!isMessageSupported(message))
-            throw new IllegalArgumentException(mpClassName + ": no handler for messages of type: " + messageClass.getName());
 
-        return invocationMethods.invokeMethod(instance, message);
+        if (!isMessageSupported(message))
+            throw new IllegalArgumentException(mpClassName + ": no handler for messages of type: " + message.getClass().getName());
+
+        return convertToKeyMessage(invocationMethods.invokeMethod(instance, message), message);
+
     }
 
-    @Override
-    public String invokeDescription(final Operation op, final Object message) {
-        Method method = null;
-        Class<?> messageClass = void.class;
-        if (op == Operation.output)
-            method = outputMethod;
-        else {
-            if (message == null)
-                return toStringValue + ".?(null)";
-
-            messageClass = message.getClass();
-            if (!isMessageSupported(message))
-                return toStringValue + ".?(" + messageClass.getName() + ")";
-
-            method = invocationMethods.getMethodForClass(message.getClass());
-        }
-
-        return toStringValue + "." + (method == null ? "?" : method.getName()) + "(" + messageClass.getSimpleName() + ")";
+    private static void getMessages(final Object message, final List<Object> messages) {
+        if (message instanceof Iterable) {
+            @SuppressWarnings("rawtypes")
+            final Iterator it = ((Iterable) message).iterator();
+            while (it.hasNext())
+                getMessages(it.next(), messages);
+        } else
+            messages.add(message);
     }
 
     public Object getPrototype() {
@@ -201,8 +158,13 @@ public class MessageProcessor implements MessageProcessorLifecycle {
      * @throws IllegalArgumentException
      */
     @Override
-    public Object invokeOutput(final Object instance) throws IllegalArgumentException, IllegalAccessException, InvocationTargetException {
-        return (outputMethod != null) ? outputMethod.invoke(instance) : null;
+    public KeyedMessage[] invokeOutput(final T instance) throws IllegalArgumentException, IllegalAccessException, InvocationTargetException {
+        if (outputMethods == null)
+            return null;
+
+        return recheck(() -> outputMethods.stream()
+                .map(om -> uncheck(() -> convertToKeyMessage(om.invoke(instance), null)))
+                .toArray(KeyedMessage[]::new), InvocationTargetException.class);
     }
 
     /**
@@ -215,8 +177,9 @@ public class MessageProcessor implements MessageProcessorLifecycle {
      * @throws InvocationTargetException
      */
     @Override
-    public boolean invokeEvictable(final Object instance) throws IllegalArgumentException, IllegalAccessException, InvocationTargetException {
-        return isEvictableSupported() ? (Boolean) evictableMethod.invoke(instance) : false;
+    public void invokeEvictable(final T instance) throws IllegalArgumentException, IllegalAccessException, InvocationTargetException {
+        if (evictableMethod != null)
+            evictableMethod.invoke(instance);
     }
 
     /**
@@ -233,28 +196,13 @@ public class MessageProcessor implements MessageProcessorLifecycle {
         return invocationMethods.isValueSupported(message);
     }
 
-    /**
-     * Determines whether this MP provides an output method.
-     */
     @Override
-    public boolean isOutputSupported() {
-        return outputMethod != null;
-    }
-
-    /**
-     * Determines whether this MP provides an evictable method.
-     */
-    @Override
-    public boolean isEvictableSupported() {
-        return evictableMethod.getMethod() != null;
-    }
-
     public void validate() throws IllegalStateException {
         if (prototype != null) {
             if (!prototype.getClass().isAnnotationPresent(Mp.class))
                 throw new IllegalStateException("Attempting to set an instance of \"" +
                         SafeString.valueOfClass(prototype) + "\" within the " +
-                        ClusterDefinition.class.getSimpleName() +
+                        Cluster.class.getSimpleName() +
                         " but it isn't identified as a MessageProcessor. Please annotate the class.");
 
             final Method[] methods = prototype.getClass().getMethods();
@@ -316,7 +264,7 @@ public class MessageProcessor implements MessageProcessorLifecycle {
         if (this == obj)
             return true;
         else if (obj instanceof MessageProcessor) {
-            final MessageProcessor that = (MessageProcessor) obj;
+            final MessageProcessor<?> that = (MessageProcessor<?>) obj;
             return this.prototype.getClass() == that.prototype.getClass();
         } else
             return false;
@@ -332,11 +280,16 @@ public class MessageProcessor implements MessageProcessorLifecycle {
         return toStringValue;
     }
 
+    @Override
+    public String[] messagesTypesHandled() {
+        return getAcceptedMessages().stream().map(c -> c.getName()).toArray(String[]::new);
+    }
+
     // ----------------------------------------------------------------------------
     // Internals
     // ----------------------------------------------------------------------------
 
-    private void validateAsMP() throws IllegalStateException {
+    private void validateAsMP() throws IllegalArgumentException {
         if (mpClass.getAnnotation(Mp.class) == null)
             throw new IllegalStateException("MP class not annotated as MessageProcessor: " + mpClassName);
     }
@@ -411,6 +364,100 @@ public class MessageProcessor implements MessageProcessorLifecycle {
                 if (cur.isInstance(th))
                     return true;
             return false;
+        }
+    }
+
+    private KeyedMessage[] convertToKeyMessage(final Object toSend, final Object message) {
+        final List<Object> messages = new ArrayList<Object>();
+        getMessages(toSend, messages);
+
+        final List<KeyedMessage> ret = new ArrayList<>(messages.size());
+
+        for (final Object msg : messages) {
+            final Class<?> messageClass = msg.getClass();
+
+            Object msgKeyValue = null;
+            try {
+                if (!stopTryingToSendTheseTypes.contains(messageClass))
+                    msgKeyValue = messageKeyGetMethodInvoker.invokeGetter(msg);
+            } catch (final IllegalArgumentException e1) {
+                stopTryingToSendTheseTypes.add(msg.getClass());
+                logger.warn("unable to retrieve key from message: " + String.valueOf(message) +
+                        (message != null ? "\" of type \"" + SafeString.valueOf(message.getClass()) : "") +
+                        "\" Please make sure its has a simple getter appropriately annotated: " +
+                        e1.getLocalizedMessage()); // no stack trace.
+            } catch (final IllegalAccessException e1) {
+                stopTryingToSendTheseTypes.add(msg.getClass());
+                logger.warn("unable to retrieve key from message: " + String.valueOf(message) +
+                        (message != null ? "\" of type \"" + SafeString.valueOf(message.getClass()) : "") +
+                        "\" Please make sure all annotated getter access is public: " +
+                        e1.getLocalizedMessage()); // no stack trace.
+            } catch (final InvocationTargetException e1) {
+                logger.warn("unable to retrieve key from message: " + String.valueOf(message) +
+                        (message != null ? "\" of type \"" + SafeString.valueOf(message.getClass()) : "") +
+                        "\" due to an exception thrown from the getter: " +
+                        e1.getLocalizedMessage(), e1.getCause());
+            }
+
+            if (msgKeyValue == null)
+                logger.warn("Null message key for \"" + SafeString.valueOf(msg) +
+                        (msg != null ? "\" of type \"" + SafeString.valueOf(msg.getClass()) : "") + "\"");
+
+            else {
+                ret.add(new KeyedMessage(msgKeyValue, toSend, messageClass.getName()));
+            }
+        }
+
+        return null;
+    }
+
+    private List<Class<?>> getAcceptedMessages() {
+        final List<Class<?>> messageClasses = new ArrayList<Class<?>>();
+        if (prototype != null) {
+            for (final Method method : prototype.getClass().getMethods()) {
+                if (method.isAnnotationPresent(MessageHandler.class)) {
+                    for (final Class<?> messageType : method.getParameterTypes()) {
+                        messageClasses.add(messageType);
+                    }
+                }
+            }
+        }
+        return messageClasses;
+    }
+
+    @Override
+    public void start(final ClusterId clusterId) {
+        for (final Method method : prototype.getClass().getMethods()) {
+            if (method.isAnnotationPresent(Start.class)) {
+                // if the start method takes a ClusterId or ClusterDefinition then pass it.
+                final Class<?>[] parameterTypes = method.getParameterTypes();
+                boolean takesClusterId = false;
+                if (parameterTypes != null && parameterTypes.length == 1) {
+                    if (ClusterId.class.isAssignableFrom(parameterTypes[0]))
+                        takesClusterId = true;
+                    else {
+                        logger.error("The method \"" + method.getName() + "\" on " + SafeString.objectDescription(prototype) +
+                                " is annotated with the @" + Start.class.getSimpleName() + " annotation but doesn't have the correct signature. " +
+                                "It needs to either take no parameters or take a single " + ClusterId.class.getSimpleName() + " parameter.");
+
+                        return; // return without invoking start.
+                    }
+                } else if (parameterTypes != null && parameterTypes.length > 1) {
+                    logger.error("The method \"" + method.getName() + "\" on " + SafeString.objectDescription(prototype) +
+                            " is annotated with the @" + Start.class.getSimpleName() + " annotation but doesn't have the correct signature. " +
+                            "It needs to either take no parameters or take a single " + ClusterId.class.getSimpleName() + " parameter.");
+                    return; // return without invoking start.
+                }
+                try {
+                    if (takesClusterId)
+                        method.invoke(prototype, clusterId);
+                    else
+                        method.invoke(prototype);
+                    break; // Only allow one such method, which is checked during validation
+                } catch (final Exception e) {
+                    logger.error(MarkerFactory.getMarker("FATAL"), "can't run MP initializer " + method.getName(), e);
+                }
+            }
         }
     }
 

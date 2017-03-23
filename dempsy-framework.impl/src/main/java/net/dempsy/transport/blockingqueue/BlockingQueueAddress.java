@@ -18,20 +18,23 @@ package net.dempsy.transport.blockingqueue;
 
 import java.util.concurrent.BlockingQueue;
 
-import net.dempsy.messagetransport.Destination;
+import net.dempsy.transport.NodeAddress;
 
-public class BlockingQueueDestination implements Destination
-{
-   protected BlockingQueue<byte[]> queue = null;
-   
-   public BlockingQueueDestination(BlockingQueue<byte[]> queue) { this.queue = queue; }
-   
-   @Override
-   public int hashCode() { return queue.hashCode(); }
-   
-   @Override
-   public boolean equals(Object other) 
-   {
-      return (other == null || !(other instanceof BlockingQueueDestination)) ? false : queue.equals(((BlockingQueueDestination) other).queue);
-   }
+public class BlockingQueueAddress implements NodeAddress {
+
+    protected final BlockingQueue<byte[]> queue;
+
+    public BlockingQueueAddress(final BlockingQueue<byte[]> queue) {
+        this.queue = queue;
+    }
+
+    @Override
+    public int hashCode() {
+        return queue.hashCode();
+    }
+
+    @Override
+    public boolean equals(final Object other) {
+        return (other == null || !(other instanceof BlockingQueueAddress)) ? false : queue.equals(((BlockingQueueAddress) other).queue);
+    }
 }

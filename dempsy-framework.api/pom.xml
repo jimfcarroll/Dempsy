@@ -16,6 +16,15 @@
        <groupId>net.dempsy</groupId>
        <artifactId>dempsy-utils</artifactId>
      </dependency>
+     <dependency>
+       <groupId>net.dempsy</groupId>
+       <artifactId>dempsy-serialization.api</artifactId>
+     </dependency>
+     <dependency>
+       <groupId>net.dempsy</groupId>
+       <artifactId>dempsy-serialization.java</artifactId>
+       <scope>test</scope>
+     </dependency>
    </dependencies>
    
 </project>

@@ -19,55 +19,37 @@ package net.dempsy.transport.blockingqueue;
 import java.util.HashMap;
 import java.util.Map;
 
-import net.dempsy.messagetransport.Destination;
-import net.dempsy.messagetransport.MessageTransportException;
-import net.dempsy.messagetransport.OverflowHandler;
-import net.dempsy.messagetransport.Sender;
-import net.dempsy.messagetransport.SenderFactory;
 import net.dempsy.monitoring.StatsCollector;
+import net.dempsy.transport.NodeAddress;
+import net.dempsy.transport.MessageTransportException;
+import net.dempsy.transport.Sender;
+import net.dempsy.transport.SenderFactory;
 
-public class BlockingQueueSenderFactory implements SenderFactory
-{
-   private Map<Destination,BlockingQueueSender> senders = new HashMap<Destination,BlockingQueueSender>();
-   private OverflowHandler overflowHandler = null;
-   private StatsCollector statsCollector;
-   
-   public BlockingQueueSenderFactory(StatsCollector statsCollector) { this.statsCollector = statsCollector; }
-   
-   public void setOverflowHandler(OverflowHandler overflowHandler) { this.overflowHandler = overflowHandler; }
-   
-   @Override
-   public synchronized Sender getSender(Destination destination) throws MessageTransportException
-   {
-      BlockingQueueSender blockingQueueSender = senders.get(destination);
-      if (blockingQueueSender == null)
-      {
-         blockingQueueSender = new BlockingQueueSender(statsCollector);
-         blockingQueueSender.setQueue(((BlockingQueueDestination)destination).queue);
-         if (overflowHandler != null)
-            blockingQueueSender.setOverflowHandler(overflowHandler);
-         senders.put(destination, blockingQueueSender);
-      }
-      
-      return blockingQueueSender;
-   }
-   
-   @Override
-   public synchronized void reclaim(Destination destination)
-   {
-      BlockingQueueSender sender = senders.get(destination);
-      if (sender != null)
-      {
-         sender.shuttingDown();
-         senders.remove(destination);
-      }
-   }
-   
-   @Override
-   public synchronized void stop()
-   {
-      for (BlockingQueueSender sender : senders.values())
-         sender.shuttingDown();
-   }
+public class BlockingQueueSenderFactory implements SenderFactory {
+    private final Map<NodeAddress, BlockingQueueSender> senders = new HashMap<NodeAddress, BlockingQueueSender>();
+    private final StatsCollector statsCollector;
+    private final boolean blocking;
+
+    public BlockingQueueSenderFactory(final boolean blocking, final StatsCollector statsCollector) {
+        this.statsCollector = statsCollector;
+        this.blocking = blocking;
+    }
+
+    @Override
+    public synchronized Sender getSender(final NodeAddress destination) throws MessageTransportException {
+        BlockingQueueSender blockingQueueSender = senders.get(destination);
+        if (blockingQueueSender == null) {
+            blockingQueueSender = new BlockingQueueSender(((BlockingQueueAddress) destination).queue, blocking, statsCollector);
+            senders.put(destination, blockingQueueSender);
+        }
+
+        return blockingQueueSender;
+    }
+
+    @Override
+    public synchronized void close() {
+        for (final BlockingQueueSender sender : senders.values())
+            sender.close();
+    }
 
 }

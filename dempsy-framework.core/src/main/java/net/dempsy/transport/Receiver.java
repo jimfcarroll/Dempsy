@@ -16,8 +16,17 @@
 
 package net.dempsy.transport;
 
-public interface Receiver extends AutoCloseable {
-    public Address getAddress() throws MessageTransportException;
+import net.dempsy.threading.ThreadingModel;
 
-    public void setListener(Listener listener) throws MessageTransportException;
+public interface Receiver extends AutoCloseable {
+
+    /**
+     * What address can a Sender use to send messages to this receiver.
+     */
+    public NodeAddress getAddress();
+
+    /**
+     * A receiver is started with a Listener and a threading model.
+     */
+    public void start(Listener listener, ThreadingModel threadingModel) throws MessageTransportException;
 }
