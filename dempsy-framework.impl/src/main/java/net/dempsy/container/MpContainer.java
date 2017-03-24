@@ -54,7 +54,7 @@ public class MpContainer {
     private final Logger logger = LoggerFactory.getLogger(getClass());
 
     // these are set during configuration
-    private MessageProcessorLifecycle prototype;
+    private MessageProcessorLifecycle<?> prototype;
     private Dispatcher dispatcher;
 
     // Note that this is set via spring/guice. Tests that need it,
@@ -82,14 +82,14 @@ public class MpContainer {
     }
 
     protected static class InstanceWrapper {
-        private final MessageProcessorLifecycle instance;
+        private final MessageProcessorLifecycle<?> instance;
         private final Semaphore lock = new Semaphore(1, true); // basically a mutex
         private boolean evicted = false;
 
         /**
          * DO NOT CALL THIS WITH NULL OR THE LOCKING LOGIC WONT WORK
          */
-        public InstanceWrapper(final MessageProcessorLifecycle o) {
+        public InstanceWrapper(final MessageProcessorLifecycle<?> o) {
             this.instance = o;
         }
 

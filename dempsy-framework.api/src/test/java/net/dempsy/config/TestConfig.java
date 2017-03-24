@@ -31,6 +31,7 @@ import net.dempsy.lifecycle.annotations.Evictable;
 import net.dempsy.lifecycle.annotations.MessageHandler;
 import net.dempsy.lifecycle.annotations.MessageKey;
 import net.dempsy.lifecycle.annotations.MessageProcessor;
+import net.dempsy.lifecycle.annotations.MessageType;
 import net.dempsy.lifecycle.annotations.Mp;
 import net.dempsy.lifecycle.annotations.Start;
 import net.dempsy.messages.Adaptor;
@@ -41,6 +42,7 @@ import net.dempsy.serialization.java.JavaSerializer;
 
 public class TestConfig {
 
+    @MessageType("GoodMessage")
     public static class GoodMessage {
         @MessageKey
         public String key() {
@@ -96,7 +98,7 @@ public class TestConfig {
     public void testSimpleConfig() throws Throwable {
         final Node node = new Node("test").setDefaultRoutingStrategy(new Object());
         final Cluster cd = new Cluster("test-slot");
-        cd.setMessageProcessor(new MessageProcessor(new GoodTestMp()));
+        cd.setMessageProcessor(new MessageProcessor<GoodTestMp>(new GoodTestMp()));
 
         node.setClusters(cd);
 
@@ -111,7 +113,7 @@ public class TestConfig {
     @Test
     public void testSimpleConfigBuilder() throws Throwable {
         final Node node = new Node("test").setDefaultRoutingStrategy(new Object());
-        final Cluster cd = node.cluster("test-slot").mp(new MessageProcessor(new GoodTestMp()));
+        final Cluster cd = node.cluster("test-slot").mp(new MessageProcessor<GoodTestMp>(new GoodTestMp()));
 
         // if we get to here without an error we should be okay
         node.validate(); // this throws if there's a problem.
@@ -134,23 +136,23 @@ public class TestConfig {
         Cluster cd = new Cluster("test-slot1").setAdaptor(new GoodAdaptor());
         clusterDefs.add(cd);
 
-        cd = new Cluster("test-slot2").mp(new MessageProcessor(new GoodTestMp()))
+        cd = new Cluster("test-slot2").mp(new MessageProcessor<GoodTestMp>(new GoodTestMp()))
                 .setDestinations(new ClusterId(new ClusterId("test", "test-slot3")));
         clusterDefs.add(cd);
 
         cd = new Cluster("test-slot3");
-        cd.setMessageProcessor(new MessageProcessor(new GoodTestMp()));
+        cd.setMessageProcessor(new MessageProcessor<GoodTestMp>(new GoodTestMp()));
         cd.setDestinations(new ClusterId[] { new ClusterId("test", "test-slot4"), new ClusterId("test", "test-slot5") });
         clusterDefs.add(cd);
 
-        cd = new Cluster("test-slot4").setMessageProcessor(new MessageProcessor(new GoodTestMp()));
+        cd = new Cluster("test-slot4").setMessageProcessor(new MessageProcessor<GoodTestMp>(new GoodTestMp()));
         clusterDefs.add(cd);
 
-        cd = new Cluster("test-slot5").setMessageProcessor(new MessageProcessor(new GoodTestMp()));
+        cd = new Cluster("test-slot5").setMessageProcessor(new MessageProcessor<GoodTestMp>(new GoodTestMp()));
         clusterDefs.add(cd);
 
         final Object clusRs = new Object();
-        cd = new Cluster("test-slot6").setMessageProcessor(new MessageProcessor(new GoodTestMp()))
+        cd = new Cluster("test-slot6").setMessageProcessor(new MessageProcessor<GoodTestMp>(new GoodTestMp()))
                 .setRoutingStrategy(clusRs);
         clusterDefs.add(cd);
 
@@ -194,11 +196,11 @@ public class TestConfig {
                 .statsCollector(appScf = new Object());
 
         app.cluster("test-slot1").adaptor(new GoodAdaptor());
-        app.cluster("test-slot2").mp(new MessageProcessor(new GoodTestMp())).destination("test-slot3");
-        app.cluster("test-slot3").mp(new MessageProcessor(new GoodTestMp())).destination("test-slot4", "test-slot5");
-        app.cluster("test-slot4").mp(new MessageProcessor(new GoodTestMp()));
-        app.cluster("test-slot5").mp(new MessageProcessor(new GoodTestMp()));
-        app.cluster("test-slot6").mp(new MessageProcessor(new GoodTestMp())).routing(clusRs = new Object());
+        app.cluster("test-slot2").mp(new MessageProcessor<GoodTestMp>(new GoodTestMp())).destination("test-slot3");
+        app.cluster("test-slot3").mp(new MessageProcessor<GoodTestMp>(new GoodTestMp())).destination("test-slot4", "test-slot5");
+        app.cluster("test-slot4").mp(new MessageProcessor<GoodTestMp>(new GoodTestMp()));
+        app.cluster("test-slot5").mp(new MessageProcessor<GoodTestMp>(new GoodTestMp()));
+        app.cluster("test-slot6").mp(new MessageProcessor<GoodTestMp>(new GoodTestMp())).routing(clusRs = new Object());
         app.cluster("test-slot1.5").adaptor(new GoodAdaptor());
 
         assertNotNull(app.getCluster(new ClusterId("test", "test-slot1.5")).getAdaptor());
@@ -244,22 +246,22 @@ public class TestConfig {
     @Test(expected = IllegalStateException.class)
     public void testFailBothPrototypeAndAdaptor() throws Throwable {
         final Cluster cd = new Cluster("test-slot1");
-        cd.setMessageProcessor(new MessageProcessor(new GoodTestMp()));
+        cd.setMessageProcessor(new MessageProcessor<GoodTestMp>(new GoodTestMp()));
         cd.setAdaptor(new GoodAdaptor());
     }
 
     @Test(expected = IllegalStateException.class)
     public void testFailBothPrototypeAndAdaptorBuilder() throws Throwable {
         final Node node = new Node("test");
-        node.cluster("test-slot1").mp(new MessageProcessor(new GoodTestMp())).adaptor(new GoodAdaptor());
+        node.cluster("test-slot1").mp(new MessageProcessor<GoodTestMp>(new GoodTestMp())).adaptor(new GoodAdaptor());
     }
 
     @Test(expected = IllegalArgumentException.class)
     public void testFailNullClusterDefinition() throws Throwable {
         final Node node = new Node("test");
-        node.setClusters(new Cluster("test-slot1").setMessageProcessor(new MessageProcessor(new GoodTestMp())),
+        node.setClusters(new Cluster("test-slot1").setMessageProcessor(new MessageProcessor<GoodTestMp>(new GoodTestMp())),
                 null,
-                new Cluster("test-slot2").setMessageProcessor(new MessageProcessor(new GoodTestMp())));
+                new Cluster("test-slot2").setMessageProcessor(new MessageProcessor<GoodTestMp>(new GoodTestMp())));
     }
 
     @Test(expected = IllegalArgumentException.class)
@@ -273,10 +275,10 @@ public class TestConfig {
         final Node app = new Node("test-tooMuchWine-needMore").setDefaultRoutingStrategy(new Object());
         app.setClusters(
                 new Cluster("notTheSame").setAdaptor(new GoodAdaptor()),
-                new Cluster("mp-stage1").setMessageProcessor(new MessageProcessor(new GoodTestMp())),
-                new Cluster("mp-stage2-dupped").setMessageProcessor(new MessageProcessor(new GoodTestMp())),
-                new Cluster("mp-stage2-dupped").setMessageProcessor(new MessageProcessor(new GoodTestMp())),
-                new Cluster("mp-stage3").setMessageProcessor(new MessageProcessor(new GoodTestMp())));
+                new Cluster("mp-stage1").setMessageProcessor(new MessageProcessor<GoodTestMp>(new GoodTestMp())),
+                new Cluster("mp-stage2-dupped").setMessageProcessor(new MessageProcessor<GoodTestMp>(new GoodTestMp())),
+                new Cluster("mp-stage2-dupped").setMessageProcessor(new MessageProcessor<GoodTestMp>(new GoodTestMp())),
+                new Cluster("mp-stage3").setMessageProcessor(new MessageProcessor<GoodTestMp>(new GoodTestMp())));
         app.validate();
     }
 
@@ -284,10 +286,10 @@ public class TestConfig {
     public void testDupClusterBuilder() throws Throwable {
         final Node node = new Node("test-tooMuchWine-needMore").defaultRoutingStrategy(new Object());
         node.cluster("notTheSame").adaptor(new GoodAdaptor());
-        node.cluster("mp-stage1").mp(new MessageProcessor(new GoodTestMp()));
-        node.cluster("mp-stage2-dupped").mp(new MessageProcessor(new GoodTestMp()));
-        node.cluster("mp-stage2-dupped").mp(new MessageProcessor(new GoodTestMp()));
-        node.cluster("mp-stage3").mp(new MessageProcessor(new GoodTestMp()));
+        node.cluster("mp-stage1").mp(new MessageProcessor<GoodTestMp>(new GoodTestMp()));
+        node.cluster("mp-stage2-dupped").mp(new MessageProcessor<GoodTestMp>(new GoodTestMp()));
+        node.cluster("mp-stage2-dupped").mp(new MessageProcessor<GoodTestMp>(new GoodTestMp()));
+        node.cluster("mp-stage3").mp(new MessageProcessor<GoodTestMp>(new GoodTestMp()));
         node.validate();
     }
 
@@ -295,7 +297,7 @@ public class TestConfig {
     public void testSimpleConfigWithKeyStore() throws Throwable {
         final Node app = new Node("test").defaultRoutingStrategy(new Object());
         final Cluster cd = new Cluster("test-slot");
-        cd.setMessageProcessor(new MessageProcessor(new GoodTestMp()));
+        cd.setMessageProcessor(new MessageProcessor<GoodTestMp>(new GoodTestMp()));
         cd.setKeySource(new KeySource<Object>() {
             @Override
             public Iterable<Object> getAllPossibleKeys() {
@@ -309,7 +311,7 @@ public class TestConfig {
     @Test
     public void testSimpleConfigWithKeyStoreBuilder() throws Throwable {
         final Node node = new Node("test").defaultRoutingStrategy(new Object());
-        node.cluster("test-slot").mp(new MessageProcessor(new GoodTestMp()))
+        node.cluster("test-slot").mp(new MessageProcessor<GoodTestMp>(new GoodTestMp()))
                 .keySource(new KeySource<Object>() {
                     @Override
                     public Iterable<Object> getAllPossibleKeys() {
@@ -387,7 +389,7 @@ public class TestConfig {
             }
         }
 
-        cd.setMessageProcessor(new MessageProcessor(new mp()));
+        cd.setMessageProcessor(new MessageProcessor<mp>(new mp()));
         app.setClusters(cd);
         app.validate();
     }
@@ -415,7 +417,7 @@ public class TestConfig {
         }
 
         final Node node = new Node("test").setDefaultRoutingStrategy(new Object());
-        node.cluster("slot").mp(new MessageProcessor(new mp()));
+        node.cluster("slot").mp(new MessageProcessor<mp>(new mp()));
         node.validate();
     }
 

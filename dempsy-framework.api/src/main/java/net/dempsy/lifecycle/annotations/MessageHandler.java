@@ -24,7 +24,6 @@ import java.lang.annotation.Target;
 
 import net.dempsy.messages.Dispatcher;
 
-
 /**
  *  <p>Marker annotation to tell the Message Dispatcher that a method is responsible
  *  for handling a message. The method must take a single parameter, which may be
@@ -37,7 +36,6 @@ import net.dempsy.messages.Dispatcher;
 @Target(ElementType.METHOD)
 @Retention(RetentionPolicy.RUNTIME)
 @Inherited
-public @interface MessageHandler
-{
-   // nothing to see here, move along
+public @interface MessageHandler {
+    String[] value() default {};
 }

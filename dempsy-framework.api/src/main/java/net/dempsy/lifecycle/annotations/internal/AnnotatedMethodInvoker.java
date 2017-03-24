@@ -25,15 +25,19 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * This class will identify and invoke annotated methods, maintaining a thread-safe cache of those methods. It currently supports the following three scenarios (which have disjoint constructors):
+ * This class will identify and invoke annotated methods, maintaining a thread-safe cache of those methods. 
+ * It currently supports the following three scenarios (which have disjoint constructors):
  * <ul>
  * <li>A single annotated getter method. <br>
- * The {@link #invokeGetter} method will look for an annotated no-parameter method on an arbitrary object, and invoke that method. Behavior is undefined if there are multiple methods with the same annotation.
+ * The {@link #invokeGetter} method will look for an annotated no-parameter method on an arbitrary object, 
+ * and invoke that method. Behavior is undefined if there are multiple methods with the same annotation.
  * <li>Multiple annotated setter methods. <br>
- * The {@link #invokeSetter} method will look for annotated methods on a single class that take one parameter of a "compatible" type to its argument. If there is no method that takes the exact type, it will
+ * The {@link #invokeSetter} method will look for annotated methods on a single class that take one parameter 
+ * of a "compatible" type to its argument. If there is no method that takes the exact type, it will
  * walk the class hierarchy of its argument to find a matching type.
  * <li>Multiple annotated single argument methods. <br>
- * The {@link #invokeMethod} method will look for annotated methods on a single class that take a <em>single</em> parameter of a "compatible" type as its argument. If there is no method that takes the exact
+ * The {@link #invokeMethod} method will look for annotated methods on a single class that take a <em>single</em>
+ * parameter of a "compatible" type as its argument. If there is no method that takes the exact
  * type, it will walk the class hierarchy of its argument to find a matching type.
  * </ul>
  * Separate instances must be constructed for these each scenario, as they're based on different data.
@@ -71,14 +75,15 @@ public class AnnotatedMethodInvoker {
             final Class<?>[] argTypes = method.getParameterTypes();
             if (argTypes.length == 1)
                 methods.put(argTypes[0], method);
+            else throw new IllegalArgumentException(
+                    "The class " + objectKlass.getName() + " has the method " + method.getName() + " and is annotated with "
+                            + annotationType.getSimpleName() + " but takes " + argTypes.length + " parameters when it must take only 1");
         }
 
-        if (methods.size() == 0) {
+        if (methods.size() == 0)
             throw new IllegalArgumentException(
-                    "class " + objectKlass.getName()
-                            + " does not have any 1-argument methods annotated with "
-                            + annotationType.getName());
-        }
+                    "class " + objectKlass.getName() + " does not have any 1-argument methods annotated with " +
+                            annotationType.getSimpleName());
     }
 
     /**
@@ -91,8 +96,7 @@ public class AnnotatedMethodInvoker {
      * @throws InvocationTargetException
      *             if the invoked method threw an exception
      */
-    public Object invokeGetter(final Object instance)
-            throws IllegalArgumentException, IllegalAccessException, InvocationTargetException {
+    public Object invokeGetter(final Object instance) throws IllegalArgumentException, IllegalAccessException, InvocationTargetException {
         final Class<?> klass = instance.getClass();
         Method method = methods.get(klass);
         if (method == null) {
@@ -164,18 +168,16 @@ public class AnnotatedMethodInvoker {
 
     /**
      * Examines the passed class and extracts a single method that is annotated with the specified annotation type, <code>null</code> if not methods are so annotated. Behavior is undefined if multiple methods
-     * have the specifed annotation.
+     * have the specified annotation.
      */
     public static <T extends Annotation> Method introspectAnnotationSingle(
             final Class<?> klass, final Class<T> annotationType) {
         final List<Method> methods = introspectAnnotationMultiple(klass, annotationType);
-        return (methods.size() > 0)
-                ? methods.get(0)
-                : null;
+        return (methods.size() > 0) ? methods.get(0) : null;
     }
 
     /**
-     * Examines the passed class and extractsall methods that are annotated with the specified annotation type (may be none).
+     * Examines the passed class and extracts all methods that are annotated with the specified annotation type (may be none).
      */
     public static <T extends Annotation> List<Method> introspectAnnotationMultiple(
             final Class<?> klass, final Class<T> annotationType) {

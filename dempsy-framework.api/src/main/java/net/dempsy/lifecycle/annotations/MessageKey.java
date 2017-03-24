@@ -22,7 +22,6 @@ import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
-
 /**
  *  Marker annotation to tell the framework which method to invoke to get the
  *  key of a message.
@@ -30,7 +29,6 @@ import java.lang.annotation.Target;
 @Target(ElementType.METHOD)
 @Retention(RetentionPolicy.RUNTIME)
 @Inherited
-public @interface MessageKey
-{
-   // nothing to see here, move along
+public @interface MessageKey {
+    // nothing to see here, move along
 }

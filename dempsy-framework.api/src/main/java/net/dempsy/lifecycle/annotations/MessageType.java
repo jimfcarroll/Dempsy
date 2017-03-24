@@ -12,5 +12,5 @@ import java.lang.annotation.Target;
 @Target({ TYPE, METHOD })
 @Inherited
 public @interface MessageType {
-    String[] value();
+    String[] value() default {};
 }

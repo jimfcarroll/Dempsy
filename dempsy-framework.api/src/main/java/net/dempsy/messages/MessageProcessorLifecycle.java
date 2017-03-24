@@ -30,7 +30,8 @@ public interface MessageProcessorLifecycle<T> {
             throws IllegalArgumentException, IllegalAccessException, InvocationTargetException;
 
     /**
-     * Invokes the passivation method of the passed instance. Will return the object's passivation data, <code>null</code> if there is none.
+     * Invokes the passivation method of the passed instance. Will return the object's passivation data, 
+     * <code>null</code> if there is none.
      * 
      * @throws InvocationTargetException
      * @throws IllegalAccessException
@@ -39,7 +40,8 @@ public interface MessageProcessorLifecycle<T> {
     public byte[] passivate(T instance) throws IllegalArgumentException, IllegalAccessException, InvocationTargetException;
 
     /**
-     * Invokes the appropriate message handler of the passed instance. Caller is responsible for not passing <code>null</code> messages.
+     * Invokes the appropriate message handler of the passed instance. Caller is responsible for not passing
+     * <code>null</code> messages.
      * 
      * @throws InvocationTargetException
      * @throws IllegalAccessException
@@ -49,7 +51,8 @@ public interface MessageProcessorLifecycle<T> {
             throws IllegalArgumentException, IllegalAccessException, InvocationTargetException;
 
     /**
-     * Invokes the output method, if it exists. If the instance does not have an annotated output method, this is a no-op (this is simpler than requiring the caller to check every instance).
+     * Invokes the output method, if it exists. If the instance does not have an annotated output method,
+     *  this is a no-op (this is simpler than requiring the caller to check every instance).
      * 
      * @throws InvocationTargetException
      * @throws IllegalAccessException
