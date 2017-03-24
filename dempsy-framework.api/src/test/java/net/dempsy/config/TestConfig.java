@@ -27,13 +27,13 @@ import java.util.List;
 
 import org.junit.Test;
 
-import net.dempsy.lifecycle.annotations.Evictable;
-import net.dempsy.lifecycle.annotations.MessageHandler;
-import net.dempsy.lifecycle.annotations.MessageKey;
-import net.dempsy.lifecycle.annotations.MessageProcessor;
-import net.dempsy.lifecycle.annotations.MessageType;
-import net.dempsy.lifecycle.annotations.Mp;
-import net.dempsy.lifecycle.annotations.Start;
+import net.dempsy.lifecycle.annotation.Evictable;
+import net.dempsy.lifecycle.annotation.MessageHandler;
+import net.dempsy.lifecycle.annotation.MessageKey;
+import net.dempsy.lifecycle.annotation.MessageProcessor;
+import net.dempsy.lifecycle.annotation.MessageType;
+import net.dempsy.lifecycle.annotation.Mp;
+import net.dempsy.lifecycle.annotation.Start;
 import net.dempsy.messages.Adaptor;
 import net.dempsy.messages.Dispatcher;
 import net.dempsy.messages.KeySource;
@@ -42,7 +42,12 @@ import net.dempsy.serialization.java.JavaSerializer;
 
 public class TestConfig {
 
-    @MessageType("GoodMessage")
+    @MessageType
+    public static interface Junk {
+
+    }
+
+    @MessageType
     public static class GoodMessage {
         @MessageKey
         public String key() {

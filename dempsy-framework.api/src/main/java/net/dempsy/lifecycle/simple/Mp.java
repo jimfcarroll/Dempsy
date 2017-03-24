@@ -1,15 +1,21 @@
 package net.dempsy.lifecycle.simple;
 
-import net.dempsy.messages.MessageProcessorLifecycle.KeyedMessage;
+import net.dempsy.messages.KeyedMessage;
 
 public interface Mp {
-    public KeyedMessage[] handle(Object message);
+    public KeyedMessage[] handle(KeyedMessage message);
 
     public default boolean evictable() {
         return false;
     }
 
-    public default void evict() {}
+    public default boolean shouldBeEvicted() {
+        return false;
+    }
+
+    public default boolean isEvictable() {
+        return false;
+    }
 
     public default KeyedMessage[] output() {
         return null;

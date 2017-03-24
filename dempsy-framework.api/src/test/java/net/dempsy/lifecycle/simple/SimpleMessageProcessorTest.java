@@ -14,21 +14,22 @@
  * limitations under the License.
  */
 
-package net.dempsy.lifecycle.annotations;
+package net.dempsy.lifecycle.simple;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
-import java.util.Date;
-
 import org.junit.Test;
 
-public class LifeCycleHelperTest {
+import net.dempsy.lifecycle.annotation.MessageKey;
+import net.dempsy.messages.KeyedMessage;
+
+public class SimpleMessageProcessorTest {
     @Test
     public void testMethodHandleWithParameters() throws Throwable {
-        final MessageProcessor helper = new MessageProcessor(new TestMp());
+        final MessageProcessor helper = new MessageProcessor(() -> new TestMp());
         final TestMp mp = (TestMp) helper.newInstance();
         assertFalse(mp.isActivated());
         helper.activate(mp, "activate", null);
@@ -41,7 +42,7 @@ public class LifeCycleHelperTest {
 
     @Test
     public void testMethodHandleWithNoParameters() throws Throwable {
-        final MessageProcessor helper = new MessageProcessor(new TestMpEmptyActivate());
+        final MessageProcessor helper = new MessageProcessor(() -> new TestMpEmptyActivate());
         final TestMpEmptyActivate mp = (TestMpEmptyActivate) helper.newInstance();
         assertFalse(mp.isActivated());
         helper.activate(mp, "activate", null);
@@ -54,7 +55,7 @@ public class LifeCycleHelperTest {
 
     @Test
     public void testMethodHandleWithOnlyKey() throws Throwable {
-        final MessageProcessor helper = new MessageProcessor(new TestMpOnlyKey());
+        final MessageProcessor helper = new MessageProcessor(() -> new TestMpOnlyKey());
         final TestMpOnlyKey mp = (TestMpOnlyKey) helper.newInstance();
         assertFalse(mp.isActivated());
         helper.activate(mp, "activate", null);
@@ -67,7 +68,7 @@ public class LifeCycleHelperTest {
 
     @Test
     public void testMethodHandleExtraParameters() throws Throwable {
-        final MessageProcessor helper = new MessageProcessor(new TestMpExtraParameters());
+        final MessageProcessor helper = new MessageProcessor(() -> new TestMpExtraParameters());
         final TestMpExtraParameters mp = (TestMpExtraParameters) helper.newInstance();
         assertFalse(mp.isActivated());
         helper.activate(mp, "activate", null);
@@ -80,7 +81,7 @@ public class LifeCycleHelperTest {
 
     @Test
     public void testMethodHandleExtraParametersOrderChanged() throws Throwable {
-        final MessageProcessor helper = new MessageProcessor(new TestMpExtraParametersChangedOrder());
+        final MessageProcessor helper = new MessageProcessor(() -> new TestMpExtraParametersChangedOrder());
         final TestMpExtraParametersChangedOrder mp = (TestMpExtraParametersChangedOrder) helper.newInstance();
         assertFalse(mp.isActivated());
         helper.activate(mp, "activate", null);
@@ -93,7 +94,7 @@ public class LifeCycleHelperTest {
 
     @Test
     public void testMethodHandleNoActivation() throws Throwable {
-        final MessageProcessor helper = new MessageProcessor(new TestMpNoActivation());
+        final MessageProcessor helper = new MessageProcessor(() -> new TestMpNoActivation());
         final TestMpNoActivation mp = (TestMpNoActivation) helper.newInstance();
         assertFalse(mp.isActivated());
         helper.activate(mp, "activate", null);
@@ -106,7 +107,7 @@ public class LifeCycleHelperTest {
 
     @Test
     public void testMethodHandleNoKey() throws Throwable {
-        final MessageProcessor helper = new MessageProcessor(new TestMpNoKey());
+        final MessageProcessor helper = new MessageProcessor(() -> new TestMpNoKey());
         final TestMpNoKey mp = (TestMpNoKey) helper.newInstance();
         assertFalse(mp.isActivated());
         helper.activate(mp, "activate", null);
@@ -117,30 +118,26 @@ public class LifeCycleHelperTest {
         assertNull(ret);
     }
 
-    @Mp
-    private class TestMp implements Cloneable {
+    private class TestMp implements Mp {
         private boolean activated = false;
         private boolean passivateCalled = false;
 
-        @MessageHandler
-        public void handleMsg(final Message val) {}
+        @Override
+        public KeyedMessage[] handle(final KeyedMessage val) {
+            return null;
+        }
 
-        @Activation
-        public void activate(final String key, final byte[] data) {
+        @Override
+        public void activate(final byte[] data, final Object key) {
             this.activated = true;
         }
 
-        @Passivation
+        @Override
         public byte[] passivate() {
             passivateCalled = true;
             return "passivate".getBytes();
         }
 
-        @Override
-        public Object clone() throws CloneNotSupportedException {
-            return super.clone();
-        }
-
         public boolean isActivated() {
             return this.activated;
         }
@@ -150,27 +147,24 @@ public class LifeCycleHelperTest {
         }
     }
 
-    @Mp
-    private class TestMpEmptyActivate implements Cloneable {
+    private class TestMpEmptyActivate implements Mp {
         private boolean activated = false;
         private boolean passivateCalled = false;
 
-        @MessageHandler
-        public void handleMsg(final Message val) {}
+        @Override
+        public KeyedMessage[] handle(final KeyedMessage val) {
+            return null;
+        }
 
-        @Activation
-        public void activate() {
+        @Override
+        public void activate(final byte[] data, final Object key) {
             this.activated = true;
         }
 
-        @Passivation
-        public void passivate() {
+        @Override
+        public byte[] passivate() {
             passivateCalled = true;
-        }
-
-        @Override
-        public Object clone() throws CloneNotSupportedException {
-            return super.clone();
+            return null;
         }
 
         public boolean isActivated() {
@@ -182,30 +176,26 @@ public class LifeCycleHelperTest {
         }
     }
 
-    @Mp
-    private class TestMpOnlyKey implements Cloneable {
+    private class TestMpOnlyKey implements Mp {
         private boolean activated = false;
         private boolean passivateCalled = false;
 
-        @MessageHandler
-        public void handleMsg(final Message val) {}
+        @Override
+        public KeyedMessage[] handle(final KeyedMessage val) {
+            return null;
+        }
 
-        @Activation
-        public void activate(final String key) {
+        @Override
+        public void activate(final byte[] data, final Object key) {
             this.activated = true;
         }
 
-        @Passivation
-        public byte[] passivate(final String key) {
+        @Override
+        public byte[] passivate() {
             passivateCalled = true;
             return "passivate".getBytes();
         }
 
-        @Override
-        public Object clone() throws CloneNotSupportedException {
-            return super.clone();
-        }
-
         public boolean isActivated() {
             return this.activated;
         }
@@ -215,30 +205,26 @@ public class LifeCycleHelperTest {
         }
     }
 
-    @Mp
-    private class TestMpExtraParameters implements Cloneable {
+    private class TestMpExtraParameters implements Mp {
         private boolean activated = false;
         private boolean passivateCalled = false;
 
-        @MessageHandler
-        public void handleMsg(final Message val) {}
+        @Override
+        public KeyedMessage[] handle(final KeyedMessage val) {
+            return null;
+        }
 
-        @Activation
-        public void activate(final String key, final byte[] data, final String arg1, final String arg2) {
+        @Override
+        public void activate(final byte[] data, final Object key) {
             this.activated = true;
         }
 
-        @Passivation
-        public byte[] passivate(final String key, final byte[] data, final String arg1, final String arg2) {
+        @Override
+        public byte[] passivate() {
             passivateCalled = true;
             return "passivate".getBytes();
         }
 
-        @Override
-        public Object clone() throws CloneNotSupportedException {
-            return super.clone();
-        }
-
         public boolean isActivated() {
             return this.activated;
         }
@@ -248,27 +234,24 @@ public class LifeCycleHelperTest {
         }
     }
 
-    @Mp
-    private class TestMpExtraParametersChangedOrder implements Cloneable {
+    private class TestMpExtraParametersChangedOrder implements Mp {
         private boolean activated = false;
         private boolean passivateCalled = false;
 
-        @MessageHandler
-        public void handleMsg(final Message val) {}
-
-        @Activation
-        public void activate(final byte[] data, final Integer arg1, final String key, final Date arg2) {
-            this.activated = true;
-        }
-
-        @Passivation
-        public void passivate(final String key, final byte[] data, final String arg1, final String arg2) {
-            passivateCalled = true;
+        @Override
+        public KeyedMessage[] handle(final KeyedMessage val) {
+            return null;
         }
 
         @Override
-        public Object clone() throws CloneNotSupportedException {
-            return super.clone();
+        public void activate(final byte[] data, final Object key) {
+            this.activated = true;
+        }
+
+        @Override
+        public byte[] passivate() {
+            passivateCalled = true;
+            return null;
         }
 
         public boolean isActivated() {
@@ -280,17 +263,13 @@ public class LifeCycleHelperTest {
         }
     }
 
-    @Mp
-    private class TestMpNoActivation implements Cloneable {
+    private class TestMpNoActivation implements Mp {
         private final boolean activated = false;
         private final boolean passivateCalled = false;
 
-        @MessageHandler
-        public void handleMsg(final Message val) {}
-
         @Override
-        public Object clone() throws CloneNotSupportedException {
-            return super.clone();
+        public KeyedMessage[] handle(final KeyedMessage val) {
+            return null;
         }
 
         public boolean isActivated() {
@@ -331,17 +310,13 @@ public class LifeCycleHelperTest {
 
     }
 
-    @Mp
-    private class TestMpNoKey implements Cloneable {
+    private class TestMpNoKey implements Mp {
         private final boolean activated = false;
         private final boolean passivateCalled = false;
 
-        @MessageHandler
-        public void handleMsg(final MessgeNoKey val) {}
-
         @Override
-        public Object clone() throws CloneNotSupportedException {
-            return super.clone();
+        public KeyedMessage[] handle(final KeyedMessage val) {
+            return null;
         }
 
         public boolean isActivated() {

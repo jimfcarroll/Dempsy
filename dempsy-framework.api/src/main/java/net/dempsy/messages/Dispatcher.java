@@ -16,7 +16,10 @@
 
 package net.dempsy.messages;
 
-import net.dempsy.config.ClusterId;
+import java.lang.reflect.InvocationTargetException;
+import java.util.List;
+
+import net.dempsy.lifecycle.annotation.MessageKey;
 
 /**
  *  <p>Implementations of this interface accept messages pushed from a source.
@@ -26,19 +29,19 @@ import net.dempsy.config.ClusterId;
  *  Dempsy framework. {@link Adaptor}s will be provided a {@link Dispatcher}, 
  *  which constitutes a handle to the Dempsy message bus.</p> 
  */
-public interface Dispatcher
-{
-   /**
+public interface Dispatcher {
+    /**
     * An {@link Adaptor} will use this method to send a "routable message" to
     * a {@link Mp} somewhere in the Dempsy application that the
     * {@link Adaptor} is part of.
     */
-   public void dispatch(Object message);
-   
-   /**
-    * If the Adaptor needs the ClusterId for logging, monitoring, or configuration
-    * it can then retrieve it from this call which will return the ClusterId for
-    * the cluster that the Adaptor is part of.
-    */
-   public ClusterId getThisClusterId();
+    public void dispatch(KeyedMessage message);
+
+    public void dispatchAnnotated(Object message) throws IllegalAccessException, IllegalArgumentException, InvocationTargetException;
+
+    public default void dispatch(final List<KeyedMessage> messages) {
+        if (messages != null)
+            messages.forEach(v -> dispatch(v));
+    }
+
 }

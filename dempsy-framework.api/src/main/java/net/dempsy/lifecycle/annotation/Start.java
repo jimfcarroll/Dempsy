@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package net.dempsy.lifecycle.annotations;
+package net.dempsy.lifecycle.annotation;
 
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Inherited;

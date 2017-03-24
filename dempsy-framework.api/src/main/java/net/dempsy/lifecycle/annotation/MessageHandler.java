@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package net.dempsy.lifecycle.annotations;
+package net.dempsy.lifecycle.annotation;
 
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Inherited;
@@ -22,13 +22,20 @@ import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
+import net.dempsy.messages.Dispatcher;
+
 /**
- *  Marker annotation to tell the framework which method to invoke to get the
- *  key of a message.
+ *  <p>Marker annotation to tell the Message Dispatcher that a method is responsible
+ *  for handling a message. The method must take a single parameter, which may be
+ *  a concrete class or interface type. If concrete, the {@link Dispatcher} will invoke
+ *  the method for messages of any concrete subclass that is not already handled
+ *  by another method.</p>
+ *  
+ *  <p>Multiple methods may be so annotated, and the annotation is inherited.</p>
  */
 @Target(ElementType.METHOD)
 @Retention(RetentionPolicy.RUNTIME)
 @Inherited
-public @interface MessageKey {
-    // nothing to see here, move along
+public @interface MessageHandler {
+    String[] value() default {};
 }

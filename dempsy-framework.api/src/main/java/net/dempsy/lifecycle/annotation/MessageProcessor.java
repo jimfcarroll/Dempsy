@@ -14,20 +14,17 @@
  * limitations under the License.
  */
 
-package net.dempsy.lifecycle.annotations;
+package net.dempsy.lifecycle.annotation;
 
-import static net.dempsy.util.Functional.recheck;
-import static net.dempsy.util.Functional.uncheck;
+import static net.dempsy.lifecycle.annotation.internal.MessageUtils.getAllMessageTypeTypeAnnotationValues;
 
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.HashMap;
-import java.util.Iterator;
+import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -35,19 +32,20 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MarkerFactory;
 
+import net.dempsy.DempsyException;
 import net.dempsy.config.Cluster;
 import net.dempsy.config.ClusterId;
-import net.dempsy.lifecycle.annotations.internal.AnnotatedMethodInvoker;
+import net.dempsy.lifecycle.annotation.internal.AnnotatedMethodInvoker;
+import net.dempsy.lifecycle.annotation.utils.KeyExtractor;
+import net.dempsy.messages.KeyedMessage;
 import net.dempsy.messages.MessageProcessorLifecycle;
 import net.dempsy.util.SafeString;
-
-NEED TO PICK OFF MESSAGETYPES THAT THIS ACCEPTS USING ANNOTATION ON THE PROTOTYPE AND/OR THE PARAMETERS OF THE HANDLERS
 
 /**
  * This class holds the MP prototype, and supports invocation of MP methods on an instance.
  */
 public class MessageProcessor<T> implements MessageProcessorLifecycle<T> {
-    private static Logger LOGGER = LoggerFactory.getLogger(MessageProcessor.class);
+    private static final Logger LOGGER = LoggerFactory.getLogger(MessageProcessor.class);
 
     private final Object prototype;
     private final Class<?> mpClass;
@@ -62,9 +60,9 @@ public class MessageProcessor<T> implements MessageProcessorLifecycle<T> {
     private final MethodHandle evictableMethod;
     private final AnnotatedMethodInvoker invocationMethods;
     private final Set<Class<?>> stopTryingToSendTheseTypes = Collections.newSetFromMap(new ConcurrentHashMap<Class<?>, Boolean>());
-    private final Map<Class<?>, MessageTypeExtractor> keyExtractors = new HashMap<Class<?>, MessageTypeExtractor>();
+    private final Set<String> typesHandled;
 
-    private static final AnnotatedMethodInvoker messageKeyGetMethodInvoker = new AnnotatedMethodInvoker(MessageKey.class);
+    private final KeyExtractor keyExtractor = new KeyExtractor();
 
     public MessageProcessor(final T prototype) throws IllegalArgumentException {
         this.prototype = prototype;
@@ -76,7 +74,7 @@ public class MessageProcessor<T> implements MessageProcessorLifecycle<T> {
         cloneMethod = introspectClone();
 
         invocationMethods = new AnnotatedMethodInvoker(mpClass, MessageHandler.class);
-        final Set<Class<?>> keys = invocationMethods.getMethods().keySet();
+        final Set<Class<?>> keys = invocationMethods.getClassesHandled();
         for (final Class<?> key : keys) {
             final Method messageKey = AnnotatedMethodInvoker.introspectAnnotationSingle(key, MessageKey.class);
             activationMethod = new MethodHandle(AnnotatedMethodInvoker.introspectAnnotationSingle(mpClass, Activation.class),
@@ -85,104 +83,87 @@ public class MessageProcessor<T> implements MessageProcessorLifecycle<T> {
         passivationMethod = new MethodHandle(AnnotatedMethodInvoker.introspectAnnotationSingle(mpClass, Passivation.class));
         outputMethods = AnnotatedMethodInvoker.introspectAnnotationMultiple(mpClass, Output.class);
         evictableMethod = new MethodHandle(AnnotatedMethodInvoker.introspectAnnotationSingle(mpClass, Evictable.class));
+        typesHandled = new HashSet<>(Arrays.asList(getMessageTypesFromMpClass(prototype.getClass())));
+        if (typesHandled == null || typesHandled.size() == 0)
+            throw new IllegalArgumentException("Cannot have a prototype Mp that has no defined MessageTypes.");
     }
 
     /**
      * Creates a new instance from the prototype.
      */
+    @SuppressWarnings("unchecked")
     @Override
-    public Object newInstance() throws InvocationTargetException, IllegalAccessException {
-        return cloneMethod.invoke(prototype);
+    public T newInstance() throws DempsyException {
+        return wrap(() -> (T) cloneMethod.invoke(prototype));
     }
 
     /**
      * Invokes the activation method of the passed instance.
      */
     @Override
-    public void activate(final T instance, final Object key, final byte[] activationData)
-            throws IllegalArgumentException, IllegalAccessException, InvocationTargetException {
-        activationMethod.invoke(instance, key, activationData);
-    }
-
-    /**
-     * Returns true if the activation method on this prototype exists and the provided exception can be assigned to one of it's declared checked exceptions.
-     */
-    public boolean activateCanThrowChecked(final Throwable th) {
-        return activationMethod.canThrowCheckedException(th);
+    public void activate(final T instance, final Object key, final byte[] activationData) throws IllegalArgumentException, DempsyException {
+        wrap(() -> activationMethod.invoke(instance, key, activationData));
     }
 
     /**
      * Invokes the passivation method of the passed instance. Will return the object's passivation data, <code>null</code> if there is none.
-     * 
-     * @throws InvocationTargetException
-     * @throws IllegalAccessException
-     * @throws IllegalArgumentException
      */
     @Override
-    public byte[] passivate(final T instance) throws IllegalArgumentException, IllegalAccessException, InvocationTargetException {
-        return (byte[]) passivationMethod.invoke(instance);
+    public byte[] passivate(final T instance) throws IllegalArgumentException, DempsyException {
+        return wrap(() -> (byte[]) passivationMethod.invoke(instance));
     }
 
     /**
      * Invokes the appropriate message handler of the passed instance. Caller is responsible for not passing <code>null</code> messages.
-     * 
-     * @throws ContainerException
-     * @throws InvocationTargetException
-     * @throws IllegalAccessException
-     * @throws IllegalArgumentException
      */
     @Override
-    public KeyedMessage[] invoke(final T instance, final Object message)
-            throws IllegalArgumentException, IllegalAccessException, InvocationTargetException {
+    public List<KeyedMessage> invoke(final T instance, final KeyedMessage message) throws IllegalArgumentException, DempsyException {
 
-        if (!isMessageSupported(message))
+        if (!isMessageSupported(message.message))
             throw new IllegalArgumentException(mpClassName + ": no handler for messages of type: " + message.getClass().getName());
 
-        return convertToKeyMessage(invocationMethods.invokeMethod(instance, message));
+        final Object returnValue = wrap(() -> invocationMethods.invokeMethod(instance, message.message));
+        return returnValue == null ? null : convertToKeyedMessage(returnValue);
 
     }
 
-    public Object getPrototype() {
-        return prototype;
-    }
+    private static final List<KeyedMessage> emptyKeyMessageList = Collections.unmodifiableList(new ArrayList<KeyedMessage>());
 
     /**
      * Invokes the output method, if it exists. If the instance does not have an annotated output method, this is a no-op (this is simpler than requiring the caller to check every instance).
-     * 
-     * @throws InvocationTargetException
-     * @throws IllegalAccessException
-     * @throws IllegalArgumentException
      */
     @Override
-    public KeyedMessage[] invokeOutput(final T instance) throws IllegalArgumentException, IllegalAccessException, InvocationTargetException {
+    public List<KeyedMessage> invokeOutput(final T instance) throws DempsyException {
         if (outputMethods == null)
-            return null;
+            return emptyKeyMessageList;
 
-        return recheck(() -> outputMethods.stream()
-                .map(om -> uncheck(() -> convertToKeyMessage(om.invoke(instance))))
-                .toArray(KeyedMessage[]::new), InvocationTargetException.class);
+        final List<KeyedMessage> ret = new ArrayList<>();
+        for (final Method om : outputMethods) {
+            final Object or = wrap(() -> om.invoke(instance));
+            if (or != null) {
+                ret.addAll(convertToKeyedMessage(or));
+            }
+        }
+
+        return ret.size() == 0 ? null : ret;
+    }
+
+    @Override
+    public boolean isOutputSupported() {
+        return outputMethods != null && outputMethods.size() > 0;
+    }
+
+    @Override
+    public boolean isEvictionSupported() {
+        return evictableMethod != null;
     }
 
     /**
      * Invokes the evictable method on the provided instance. If the evictable is not implemented, returns false.
-     * 
-     * @param instance
-     * @return
-     * @throws IllegalArgumentException
-     * @throws IllegalAccessException
-     * @throws InvocationTargetException
      */
     @Override
-    public void invokeEvictable(final T instance) throws IllegalArgumentException, IllegalAccessException, InvocationTargetException {
-        if (evictableMethod != null)
-            evictableMethod.invoke(instance);
-    }
-
-    /**
-     * Determines whether the passed class matches the prototype's class.
-     */
-    public boolean isMatchingClass(final Class<?> klass) {
-        return klass.equals(prototype.getClass());
+    public boolean invokeEvictable(final T instance) throws DempsyException {
+        return isEvictionSupported() ? (Boolean) wrap(() -> evictableMethod.invoke(instance)) : false;
     }
 
     /**
@@ -255,8 +236,8 @@ public class MessageProcessor<T> implements MessageProcessorLifecycle<T> {
     }
 
     @Override
-    public String[] messagesTypesHandled() {
-        return getAcceptedMessages().stream().map(c -> c.getName()).toArray(String[]::new);
+    public Set<String> messagesTypesHandled() {
+        return typesHandled;
     }
 
     @Override
@@ -270,7 +251,7 @@ public class MessageProcessor<T> implements MessageProcessorLifecycle<T> {
 
     private void checkOrInvokeValidStartMethod(final boolean invoke, final ClusterId clusterId) throws IllegalStateException {
         Method startMethod = null;
-        for (final Method method : prototype.getClass().getMethods()) {
+        for (final Method method : prototype.getClass().getDeclaredMethods()) {
             if (method.isAnnotationPresent(Start.class)) {
                 if (startMethod != null)
                     throw new IllegalStateException("Multiple methods on the message processor of type\""
@@ -281,29 +262,31 @@ public class MessageProcessor<T> implements MessageProcessorLifecycle<T> {
         }
 
         // if the start method takes a ClusterId or ClusterDefinition then pass it.
-        final Class<?>[] parameterTypes = startMethod.getParameterTypes();
-        boolean takesClusterId = false;
-        if (parameterTypes != null && parameterTypes.length == 1) {
-            if (ClusterId.class.isAssignableFrom(parameterTypes[0]))
-                takesClusterId = true;
-            else {
+        if (startMethod != null) {
+            final Class<?>[] parameterTypes = startMethod.getParameterTypes();
+            boolean takesClusterId = false;
+            if (parameterTypes != null && parameterTypes.length == 1) {
+                if (ClusterId.class.isAssignableFrom(parameterTypes[0]))
+                    takesClusterId = true;
+                else {
+                    throw new IllegalStateException("The method \"" + startMethod.getName() + "\" on " + SafeString.objectDescription(prototype) +
+                            " is annotated with the @" + Start.class.getSimpleName() + " annotation but doesn't have the correct signature. " +
+                            "It needs to either take no parameters or take a single " + ClusterId.class.getSimpleName() + " parameter.");
+                }
+            } else if (parameterTypes != null && parameterTypes.length > 1) {
                 throw new IllegalStateException("The method \"" + startMethod.getName() + "\" on " + SafeString.objectDescription(prototype) +
                         " is annotated with the @" + Start.class.getSimpleName() + " annotation but doesn't have the correct signature. " +
                         "It needs to either take no parameters or take a single " + ClusterId.class.getSimpleName() + " parameter.");
             }
-        } else if (parameterTypes != null && parameterTypes.length > 1) {
-            throw new IllegalStateException("The method \"" + startMethod.getName() + "\" on " + SafeString.objectDescription(prototype) +
-                    " is annotated with the @" + Start.class.getSimpleName() + " annotation but doesn't have the correct signature. " +
-                    "It needs to either take no parameters or take a single " + ClusterId.class.getSimpleName() + " parameter.");
-        }
-        if (invoke) {
-            try {
-                if (takesClusterId)
-                    startMethod.invoke(prototype, clusterId);
-                else
-                    startMethod.invoke(prototype);
-            } catch (final Exception e) {
-                LOGGER.error(MarkerFactory.getMarker("FATAL"), "can't run MP initializer " + startMethod.getName(), e);
+            if (invoke) {
+                try {
+                    if (takesClusterId)
+                        startMethod.invoke(prototype, clusterId);
+                    else
+                        startMethod.invoke(prototype);
+                } catch (final Exception e) {
+                    LOGGER.error(MarkerFactory.getMarker("FATAL"), "can't run MP initializer " + startMethod.getName(), e);
+                }
             }
         }
     }
@@ -326,7 +309,6 @@ public class MessageProcessor<T> implements MessageProcessorLifecycle<T> {
 
     /**
      * Class to handle method calls for activation and passivation
-     *
      */
     protected class MethodHandle {
         private final Method method;
@@ -386,131 +368,59 @@ public class MessageProcessor<T> implements MessageProcessorLifecycle<T> {
         }
     }
 
-    private static void getMessages(final Object message, final List<Object> messages) {
-        if (message instanceof Iterable) {
-            @SuppressWarnings("rawtypes")
-            final Iterator it = ((Iterable) message).iterator();
-            while (it.hasNext())
-                getMessages(it.next(), messages);
-        } else
-            messages.add(message);
-    }
-
-    private static class MessageTypeExtractor {
-        public final String[] classDefinedMessageTypes;
-        public final Method[] methodsThatGetsMessageTypes;
-
-        public MessageTypeExtractor(final Class<?> messageClass) {
-            // search for the MessageType annotation on the class
-            final MessageType ann = messageClass.getAnnotation(MessageType.class);
-            classDefinedMessageTypes = (ann != null) ? ann.value() : null;
-
-            final List<Method> mtMethods = new ArrayList<>();
-            for (final Method method : messageClass.getDeclaredMethods()) {
-                if (method.isAnnotationPresent(MessageType.class)) {
-                    // make sure it qualifies.
-                    if (method.getParameterCount() > 0)
-                        throw new IllegalStateException("The message class " + messageClass.getName() +
-                                " has the method " + method.getName() + " annotated with  " + MessageType.class.getSimpleName() +
-                                " but it takes parameters when it shouldn't.");
-
-                    if (!String[].class.isAssignableFrom(method.getReturnType()))
-                        throw new IllegalStateException("The message class " + messageClass.getName() +
-                                " has the method " + method.getName() + " annotated with  " + MessageType.class.getSimpleName() +
-                                " but doesn't return an array of Strings.");
-
-                    mtMethods.add(method);
-                }
-            }
-
-            methodsThatGetsMessageTypes = (mtMethods.size() == 0) ? null : mtMethods.toArray(new Method[mtMethods.size()]);
-        }
-
-        public String[] get(final Object message) {
-            if (methodsThatGetsMessageTypes == null)
-                return classDefinedMessageTypes;
-
-            else {
-                final String[] subret = Arrays.stream(methodsThatGetsMessageTypes).map(m -> {
-                    try {
-                        return (String[]) m.invoke(message);
-                    } catch (IllegalAccessException | IllegalArgumentException | InvocationTargetException e) {
-                        LOGGER.warn("Can't invoke method " + m.getName() + " due to the following exception", e);
-                        return new String[0];
-                    }
-                }).map(Arrays::stream).flatMap(v -> v).toArray(String[]::new);
-
-                if (classDefinedMessageTypes != null)
-                    return Arrays.stream(new String[][] { classDefinedMessageTypes, subret }).map(Arrays::stream).flatMap(v -> v)
-                            .toArray(String[]::new);
-                else
-                    return subret;
-            }
-        }
-    }
-
-    private KeyedMessage[] convertToKeyMessage(final Object toSend) {
-        final List<Object> messages = new ArrayList<Object>();
-        getMessages(toSend, messages);
-
-        final ArrayList<KeyedMessage> ret = new ArrayList<>(messages.size());
-
-        for (final Object msg : messages) {
-            final Class<?> messageClass = msg.getClass();
-
-            Object msgKeyValue = null;
-            MessageTypeExtractor extractor = null;
-            try {
-                if (!stopTryingToSendTheseTypes.contains(messageClass)) {
-                    msgKeyValue = messageKeyGetMethodInvoker.invokeGetter(msg);
-
-                    extractor = keyExtractors.get(messageClass);
-                    if (extractor == null) {
-                        extractor = new MessageTypeExtractor(messageClass);
-                        keyExtractors.put(messageClass, extractor);
-                    }
-                }
-            } catch (final IllegalArgumentException e1) {
-                stopTryingToSendTheseTypes.add(msg.getClass());
-                LOGGER.warn("unable to retrieve key from message: " + String.valueOf(toSend) +
-                        (toSend != null ? "\" of type \"" + SafeString.valueOf(toSend.getClass()) : "") +
-                        "\" Please make sure its has a simple getter appropriately annotated: " +
-                        e1.getLocalizedMessage()); // no stack trace.
-            } catch (final IllegalAccessException e1) {
-                stopTryingToSendTheseTypes.add(msg.getClass());
-                LOGGER.warn("unable to retrieve key from message: " + String.valueOf(toSend) +
-                        (toSend != null ? "\" of type \"" + SafeString.valueOf(toSend.getClass()) : "") +
-                        "\" Please make sure all annotated getter access is public: " +
-                        e1.getLocalizedMessage()); // no stack trace.
-            } catch (final InvocationTargetException e1) {
-                LOGGER.warn("unable to retrieve key from message: " + String.valueOf(toSend) +
-                        (toSend != null ? "\" of type \"" + SafeString.valueOf(toSend.getClass()) : "") +
-                        "\" due to an exception thrown from the getter: " +
-                        e1.getLocalizedMessage(), e1.getCause());
-            }
-
-            if (msgKeyValue == null)
-                LOGGER.warn("Null message key for \"" + SafeString.valueOf(msg) +
-                        (msg != null ? "\" of type \"" + SafeString.valueOf(msg.getClass()) : "") + "\"");
-
+    private List<KeyedMessage> convertToKeyedMessage(final Object toSend) {
+        final Class<?> messageClass = toSend.getClass();
+        try {
+            if (!stopTryingToSendTheseTypes.contains(messageClass))
+                return keyExtractor.extract(toSend);
             else
-                ret.add(new KeyedMessage(msgKeyValue, toSend, extractor.get(toSend)));
+                return emptyKeyMessageList;
+        } catch (final IllegalArgumentException e1) {
+            stopTryingToSendTheseTypes.add(messageClass.getClass());
+            LOGGER.warn("unable to retrieve key or message type from message: \"" + String.valueOf(toSend) +
+                    (toSend != null ? "\" of type \"" + SafeString.valueOf(toSend.getClass()) : "") +
+                    "\" Please make sure its has a simple getter appropriately annotated: " +
+                    e1.getLocalizedMessage()); // no stack trace.
+        } catch (final IllegalAccessException e1) {
+            stopTryingToSendTheseTypes.add(messageClass.getClass());
+            LOGGER.warn("unable to retrieve key from message: " + String.valueOf(toSend) +
+                    (toSend != null ? "\" of type \"" + SafeString.valueOf(toSend.getClass()) : "") +
+                    "\" Please make sure all annotated getter access is public: " +
+                    e1.getLocalizedMessage()); // no stack trace.
+        } catch (final InvocationTargetException e1) {
+            LOGGER.warn("unable to retrieve key from message: " + String.valueOf(toSend) +
+                    (toSend != null ? "\" of type \"" + SafeString.valueOf(toSend.getClass()) : "") +
+                    "\" due to an exception thrown from the getter: " +
+                    e1.getLocalizedMessage(), e1.getCause());
         }
-
-        return ret.toArray(new KeyedMessage[ret.size()]);
+        return emptyKeyMessageList;
     }
 
-    private List<Class<?>> getAcceptedMessages() {
-        final List<Class<?>> messageClasses = new ArrayList<Class<?>>();
-        if (prototype != null) {
-            for (final Method method : prototype.getClass().getMethods()) {
-                if (method.isAnnotationPresent(MessageHandler.class)) {
-                    for (final Class<?> messageType : method.getParameterTypes()) {
-                        messageClasses.add(messageType);
-                    }
-                }
-            }
+    // =============================================================================================
+
+    private static String[] getMessageTypesFromMpClass(final Class<?> mpClass) {
+        final String[] classAnn = getAllMessageTypeTypeAnnotationValues(mpClass, false);
+
+        // Find all of the handle methods and introspect their parameters.
+        final String[] methAnn = AnnotatedMethodInvoker.introspectAnnotationMultiple(mpClass, MessageHandler.class).stream()
+                .map(m -> getAllMessageTypeTypeAnnotationValues(m.getParameterTypes()[0], false)).map(Arrays::stream).flatMap(v -> v)
+                .toArray(String[]::new);
+
+        return Arrays.stream(new String[][] { classAnn, methAnn }).map(Arrays::stream).flatMap(v -> v).toArray(String[]::new);
+    }
+
+    @FunctionalInterface
+    private static interface ThrowingSupplier<T> {
+        public T run() throws IllegalAccessException, InvocationTargetException;
+    }
+
+    private static <T> T wrap(final ThrowingSupplier<T> runnable) throws DempsyException {
+        try {
+            return runnable.run();
+        } catch (final InvocationTargetException e) {
+            throw new DempsyException(e.getCause());
+        } catch (final IllegalAccessException e) {
+            throw new DempsyException(e);
         }
-        return messageClasses;
     }
 }

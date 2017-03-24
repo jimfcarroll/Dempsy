@@ -14,14 +14,16 @@
  * limitations under the License.
  */
 
-package net.dempsy.lifecycle.annotations.internal;
+package net.dempsy.lifecycle.annotation.internal;
 
 import java.lang.annotation.Annotation;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -47,16 +49,6 @@ public class AnnotatedMethodInvoker {
     private final Map<Class<?>, Method> methods = new ConcurrentHashMap<Class<?>, Method>();
 
     /**
-     * Constructs an instance to be used with annotated getter methods.
-     *
-     * @param annotationType
-     *            Annotation that identifies getter methods.
-     */
-    public AnnotatedMethodInvoker(final Class<? extends Annotation> annotationType) {
-        this.annotationType = annotationType;
-    }
-
-    /**
      * Constructs an instance to be used with annotated setter methods.
      *
      * @param objectKlass
@@ -77,7 +69,7 @@ public class AnnotatedMethodInvoker {
                 methods.put(argTypes[0], method);
             else throw new IllegalArgumentException(
                     "The class " + objectKlass.getName() + " has the method " + method.getName() + " and is annotated with "
-                            + annotationType.getSimpleName() + " but takes " + argTypes.length + " parameters when it must take only 1");
+                            + annotationType.getSimpleName() + " but takes " + argTypes.length + " parameters when it must take exactly 1");
         }
 
         if (methods.size() == 0)
@@ -126,7 +118,7 @@ public class AnnotatedMethodInvoker {
     public Object invokeSetter(final Object instance, final Object value)
             throws IllegalArgumentException, IllegalAccessException, InvocationTargetException {
         final Class<?> valueClass = value.getClass();
-        final Method method = getMethodForClass(valueClass);
+        final Method method = getInvokableMethodForClass(valueClass);
         if (method == null) {
             throw new IllegalArgumentException(
                     "class " + instance.getClass().getName()
@@ -149,7 +141,7 @@ public class AnnotatedMethodInvoker {
     public Object invokeMethod(final Object instance, final Object value)
             throws IllegalArgumentException, IllegalAccessException, InvocationTargetException {
         final Class<?> valueClass = value.getClass();
-        final Method method = getMethodForClass(valueClass);
+        final Method method = getInvokableMethodForClass(valueClass);
         if (method == null) {
             throw new IllegalArgumentException(
                     "class " + instance.getClass().getName()
@@ -163,7 +155,7 @@ public class AnnotatedMethodInvoker {
      * Identifies whether there is an annotated setter appropriate to the passed value. This may be used as a pre-test for {@link #invokeSetter}, to avoid catching <code>IllegalArgumentException</code>.
      */
     public boolean isValueSupported(final Object value) {
-        return getMethodForClass(value.getClass()) != null;
+        return getInvokableMethodForClass(value.getClass()) != null;
     }
 
     /**
@@ -193,7 +185,7 @@ public class AnnotatedMethodInvoker {
     // Internals
     // ----------------------------------------------------------------------------
 
-    public Method getMethodForClass(Class<?> valueClass) {
+    public Method getInvokableMethodForClass(Class<?> valueClass) {
         if (valueClass == null)
             return null;
 
@@ -207,14 +199,52 @@ public class AnnotatedMethodInvoker {
             return null;
 
         // once we learn the handler method, we'll remember it to avoid future recursion
-        method = getMethodForClass(valueClass);
+        method = getInvokableMethodForClass(valueClass);
         if (method != null)
             methods.put(valueClass, method);
 
         return method;
     }
 
-    public Map<Class<?>, Method> getMethods() {
-        return this.methods;
+    public Set<Class<?>> getClassesHandled() {
+        return this.methods.keySet();
     }
+
+    public static class AnnotatedClass<A extends Annotation> {
+        public final Class<?> clazz;
+        public final A annotation;
+
+        public AnnotatedClass(final Class<?> clazz, final A annotation) {
+            this.clazz = clazz;
+            this.annotation = annotation;
+        }
+    }
+
+    /**
+     * Get all annotation on the given class, plus all annotations on the parent classes 
+     * @param clazz
+     * @param annotation
+     * @return
+     */
+    public static <A extends Annotation> List<AnnotatedClass<A>> allTypeAnnotations(final Class<?> clazz, final Class<A> annotation,
+            final boolean recurse) {
+        final List<AnnotatedClass<A>> ret = new ArrayList<>();
+        final A curClassAnnotation = clazz.getAnnotation(annotation);
+        if (curClassAnnotation != null)
+            ret.add(new AnnotatedClass<A>(clazz, curClassAnnotation));
+
+        if (!recurse)
+            return ret;
+
+        final Class<?> superClazz = clazz.getSuperclass();
+        if (superClazz != null)
+            ret.addAll(allTypeAnnotations(superClazz, annotation, recurse));
+
+        // Now do the interfaces.
+        final Class<?>[] ifaces = clazz.getInterfaces();
+        if (ifaces != null && ifaces.length > 0)
+            Arrays.stream(ifaces).forEach(iface -> ret.addAll(allTypeAnnotations(iface, annotation, recurse)));
+        return ret;
+    }
+
 }

@@ -1,33 +1,23 @@
 package net.dempsy.messages;
 
 import java.lang.reflect.InvocationTargetException;
+import java.util.List;
+import java.util.Set;
 
+import net.dempsy.DempsyException;
 import net.dempsy.config.ClusterId;
 
 public interface MessageProcessorLifecycle<T> {
 
-    public static class KeyedMessage {
-        public final Object key;
-        public final String[] messageTypes;
-        public final Object message;
-
-        public KeyedMessage(final Object key, final Object message, final String... messageTypes) {
-            this.key = key;
-            this.message = message;
-            this.messageTypes = messageTypes;
-        }
-    }
-
     /**
      * Creates a new instance from the prototype.
      */
-    public Object newInstance() throws InvocationTargetException, IllegalAccessException;
+    public T newInstance() throws DempsyException;
 
     /**
      * Invokes the activation method of the passed instance.
      */
-    public void activate(T instance, Object key, byte[] activationData)
-            throws IllegalArgumentException, IllegalAccessException, InvocationTargetException;
+    public void activate(T instance, Object key, byte[] activationData) throws IllegalArgumentException, DempsyException;
 
     /**
      * Invokes the passivation method of the passed instance. Will return the object's passivation data, 
@@ -37,7 +27,7 @@ public interface MessageProcessorLifecycle<T> {
      * @throws IllegalAccessException
      * @throws IllegalArgumentException
      */
-    public byte[] passivate(T instance) throws IllegalArgumentException, IllegalAccessException, InvocationTargetException;
+    public byte[] passivate(T instance) throws IllegalArgumentException, DempsyException;
 
     /**
      * Invokes the appropriate message handler of the passed instance. Caller is responsible for not passing
@@ -47,8 +37,7 @@ public interface MessageProcessorLifecycle<T> {
      * @throws IllegalAccessException
      * @throws IllegalArgumentException
      */
-    public KeyedMessage[] invoke(T instance, Object message)
-            throws IllegalArgumentException, IllegalAccessException, InvocationTargetException;
+    public List<KeyedMessage> invoke(T instance, KeyedMessage message) throws IllegalArgumentException, DempsyException;
 
     /**
      * Invokes the output method, if it exists. If the instance does not have an annotated output method,
@@ -58,7 +47,9 @@ public interface MessageProcessorLifecycle<T> {
      * @throws IllegalAccessException
      * @throws IllegalArgumentException
      */
-    public KeyedMessage[] invokeOutput(T instance) throws IllegalArgumentException, IllegalAccessException, InvocationTargetException;
+    public List<KeyedMessage> invokeOutput(T instance) throws DempsyException;
+
+    public boolean isOutputSupported();
 
     /**
      * Invokes the evictable method on the provided instance. If the evictable is not implemented, returns false.
@@ -68,9 +59,11 @@ public interface MessageProcessorLifecycle<T> {
      * @throws IllegalAccessException
      * @throws InvocationTargetException
      */
-    public void invokeEvictable(T instance) throws IllegalArgumentException, IllegalAccessException, InvocationTargetException;
+    public boolean invokeEvictable(T instance) throws DempsyException;
 
-    public String[] messagesTypesHandled();
+    public boolean isEvictionSupported();
+
+    public Set<String> messagesTypesHandled();
 
     public void validate() throws IllegalStateException;
 

@@ -14,24 +14,21 @@
  * limitations under the License.
  */
 
-package net.dempsy.lifecycle.annotations;
+package net.dempsy.lifecycle.annotation;
 
-import java.lang.annotation.*;
-
+import java.lang.annotation.ElementType;
+import java.lang.annotation.Inherited;
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
+import java.lang.annotation.Target;
 
 /**
- *  Marker annotation to tell the Container that a method should be called
- *  during a container-wide output operation. This method must not take any
- *  parameters.
- *  <p>
- *  Only one method in a class should be marked as an output method. If
- *  multiple methods are so annotated, the behavior is undefined. For this
- *  reason, this annotation is not inherited.
+ *  Marker annotation to tell the framework which method to invoke to get the
+ *  key of a message.
  */
 @Target(ElementType.METHOD)
 @Retention(RetentionPolicy.RUNTIME)
 @Inherited
-public @interface Output
-{
-   // nothing to see here, move along
+public @interface MessageKey {
+    // nothing to see here, move along
 }

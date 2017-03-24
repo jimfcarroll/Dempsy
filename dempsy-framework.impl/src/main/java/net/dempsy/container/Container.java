@@ -16,11 +16,13 @@
 
 package net.dempsy.container;
 
-import java.lang.reflect.InvocationTargetException;
+import static net.dempsy.util.SafeString.objectDescription;
+
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedList;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -36,28 +38,31 @@ import java.util.concurrent.atomic.AtomicLong;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import net.dempsy.DempsyException;
 import net.dempsy.config.ClusterId;
 import net.dempsy.messages.Dispatcher;
-import net.dempsy.messages.KeySource;
+import net.dempsy.messages.KeyedMessage;
 import net.dempsy.messages.MessageProcessorLifecycle;
 import net.dempsy.monitoring.StatsCollector;
 import net.dempsy.util.SafeString;
 
 /**
  * <p>
- * The {@link MpContainer} manages the lifecycle of message processors for the node that it's instantiated in.
+ * The {@link Container} manages the lifecycle of message processors for the node that it's instantiated in.
  * </p>
  * 
- * The container is simple in that it does no thread management. When it's called it assumes that the transport has provided the thread that's needed
+ * The container is simple in that it does no thread management. When it's called it assumes that the transport 
+ * has provided the thread that's needed
  */
-public class MpContainer {
-    private final Logger logger = LoggerFactory.getLogger(getClass());
+public class Container {
+    private final Logger LOGGER = LoggerFactory.getLogger(getClass());
 
     // these are set during configuration
-    private MessageProcessorLifecycle<?> prototype;
+    @SuppressWarnings("rawtypes")
+    private final MessageProcessorLifecycle prototype;
     private Dispatcher dispatcher;
 
-    // Note that this is set via spring/guice. Tests that need it,
+    // Note that this is set via spring Tests that need it,
     // should set it them selves. Having a default leaks 8 threads per
     // instance.
     private StatsCollector statCollector;
@@ -72,24 +77,27 @@ public class MpContainer {
     // The ClusterId is set for the sake of error messages.
     private final ClusterId clusterId;
 
-    // This holds the keySource for pre(re)-instantiation
-    private KeySource<?> keySource = null;
-
     private volatile boolean isRunning = true;
 
-    public MpContainer(final ClusterId clusterId) {
+    public Container(final MessageProcessorLifecycle<?> prototype, final ClusterId clusterId) {
         this.clusterId = clusterId;
+        this.prototype = prototype;
+
+        prototype.start(clusterId);
+
+        if (outputConcurrency > 0)
+            setupOutputConcurrency();
     }
 
     protected static class InstanceWrapper {
-        private final MessageProcessorLifecycle<?> instance;
+        private final Object instance;
         private final Semaphore lock = new Semaphore(1, true); // basically a mutex
         private boolean evicted = false;
 
         /**
          * DO NOT CALL THIS WITH NULL OR THE LOCKING LOGIC WONT WORK
          */
-        public InstanceWrapper(final MessageProcessorLifecycle<?> o) {
+        public InstanceWrapper(final Object o) {
             this.instance = o;
         }
 
@@ -167,33 +175,6 @@ public class MpContainer {
     // Configuration
     // ----------------------------------------------------------------------------
 
-    public void setMessagerProcessor(final MessageProcessorLifecycle<?> prototype) {
-        this.prototype = prototype;
-
-        prototype.start(clusterId);
-
-        if (outputConcurrency > 0)
-            setupOutputConcurrency();
-    }
-
-    /**
-     * Run any methods annotated PreInitilze on the MessageProcessor prototype
-     * 
-     * @param prototype
-     *            reference to MessageProcessor prototype
-     */
-    private void preInitializePrototype(final MessageProcessorLifecycle prototype) {
-        prototype.start(clusterId);
-    }
-
-    public MessageProcessorLifecycle getPrototype() {
-        return prototype;
-    }
-
-    public Map<Object, InstanceWrapper> getInstances() {
-        return instances;
-    }
-
     public void setDispatcher(final Dispatcher dispatcher) {
         this.dispatcher = dispatcher;
     }
@@ -206,10 +187,6 @@ public class MpContainer {
         this.statCollector = collector;
     }
 
-    public void setKeySource(final KeySource<?> keySource) {
-        this.keySource = keySource;
-    }
-
     // ----------------------------------------------------------------------------
     // Monitoring / Management
     // ----------------------------------------------------------------------------
@@ -218,17 +195,8 @@ public class MpContainer {
     // Operation
     // ----------------------------------------------------------------------------
 
-    /**
-     * {@inheritDoc}
-     */
-    public void shuttingDown() {
-        isRunning = false;
-        shutdown();
-        // we don't care about the transport shutting down (currently)
-
-    }
-
     public void shutdown() {
+        isRunning = false;
         if (evictionScheduler != null)
             evictionScheduler.shutdownNow();
 
@@ -259,22 +227,12 @@ public class MpContainer {
         return statCollector;
     }
 
-    /**
-     * Returns the Message Processor that is associated with a given key, <code>null</code> if there is no such MP. Does <em>not</em> create a new MP.
-     * <p>
-     * <em>This method exists for testing; don't do anything stupid</em>
-     */
-    protected Object getMessageProcessor(final Object key) {
-        final InstanceWrapper wrapper = instances.get(key);
-        return (wrapper != null) ? wrapper.getInstance() : null;
-    }
-
     // ----------------------------------------------------------------------------
     // Internals
     // ----------------------------------------------------------------------------
 
     // this is called directly from tests but shouldn't be accessed otherwise.
-    protected boolean dispatch(final Object message, final boolean block) throws IllegalArgumentException {
+    protected boolean dispatch(final KeyedMessage message, final boolean block) throws IllegalArgumentException {
         statCollector.messageReceived(message);
         if (message == null)
             return false; // No. We didn't process the null message
@@ -302,8 +260,8 @@ public class MpContainer {
                                 evictedAndBlocking = true; // we're going to try again.
                             } else // otherwise it's just like we couldn't get the lock. The Mp is busy being killed off.
                             {
-                                if (logger.isTraceEnabled())
-                                    logger.trace("the container for " + clusterId + " failed handle message due to evicted Mp "
+                                if (LOGGER.isTraceEnabled())
+                                    LOGGER.trace("the container for " + clusterId + " failed handle message due to evicted Mp "
                                             + SafeString.valueOf(prototype));
 
                                 statCollector.messageDiscarded(message);
@@ -319,15 +277,15 @@ public class MpContainer {
                     }
                 } else // ... we didn't get the lock
                 {
-                    if (logger.isTraceEnabled())
-                        logger.trace("the container for " + clusterId + " failed to obtain lock on " + SafeString.valueOf(prototype));
+                    if (LOGGER.isTraceEnabled())
+                        LOGGER.trace("the container for " + clusterId + " failed to obtain lock on " + SafeString.valueOf(prototype));
                     statCollector.messageDiscarded(message);
                     statCollector.messageCollision(message);
                 }
             } else {
                 // if we got here then the activate on the Mp explicitly returned 'false'
-                if (logger.isDebugEnabled())
-                    logger.debug("the container for " + clusterId + " failed to activate the Mp for " + SafeString.valueOf(prototype));
+                if (LOGGER.isDebugEnabled())
+                    LOGGER.debug("the container for " + clusterId + " failed to activate the Mp for " + SafeString.valueOf(prototype));
                 // we consider this "processed"
                 break; // leave the do/while loop
             }
@@ -341,42 +299,36 @@ public class MpContainer {
      * 
      * This method can return null if the instance activation explicitly returns 'false' which tells the container NOT to incorporate the new instance.
      */
-    protected InstanceWrapper getInstanceForDispatch(final Object message) throws IllegalArgumentException {
+    protected InstanceWrapper getInstanceForDispatch(final KeyedMessage message) throws IllegalArgumentException {
         if (message == null)
             throw new IllegalArgumentException("the container for " + clusterId + " attempted to dispatch null message.");
 
-        if (!prototype.isMessageSupported(message))
-            throw new ContainerException("the container for " + clusterId + " has a prototype " + SafeString.valueOf(prototype) +
-                    " that does not handle messages of class " + SafeString.valueOfClass(message));
+        // make sure the message belongs here.
+        prototype.messagesTypesHandled();
 
-        final Object key = getKeyFromMessage(message);
+        final Object key = message.key;
         final InstanceWrapper wrapper = getInstanceForKey(key);
         return wrapper;
     }
 
     public void evict() {
         doEvict(new EvictCheck() {
+            @SuppressWarnings("unchecked")
             @Override
             public boolean shouldEvict(final Object key, final InstanceWrapper wrapper) {
                 final Object instance = wrapper.getInstance();
                 try {
                     return prototype.invokeEvictable(instance);
-                } catch (final InvocationTargetException e) {
-                    logger.warn("Checking the eviction status/passivating of the Mp " + SafeString.objectDescription(instance) +
+                } catch (final DempsyException e) {
+                    LOGGER.warn("Checking the eviction status/passivating of the Mp " + SafeString.objectDescription(instance) +
                             " resulted in an exception.", e.getCause());
-                } catch (final IllegalAccessException e) {
-                    logger.warn(
-                            "It appears that the method for checking the eviction or passivating the Mp " + SafeString.objectDescription(instance) +
-                                    " is not defined correctly. Is it visible?",
-                            e);
                 }
-
                 return false;
             }
 
             @Override
             public boolean isGenerallyEvitable() {
-                return prototype.isEvictableSupported();
+                return prototype.isEvictionSupported();
             }
 
             @Override
@@ -394,6 +346,7 @@ public class MpContainer {
         boolean shouldStopEvicting();
     }
 
+    @SuppressWarnings("unchecked")
     private void doEvict(final EvictCheck check) {
         if (!check.isGenerallyEvitable() || !isRunning)
             return;
@@ -442,7 +395,7 @@ public class MpContainer {
                                 try {
                                     instance = wrapper.getInstance();
                                 } catch (final Throwable th) {} // not sure why this would ever happen
-                                logger.warn("Checking the eviction status/passivating of the Mp "
+                                LOGGER.warn("Checking the eviction status/passivating of the Mp "
                                         + SafeString.objectDescription(instance == null ? wrapper : instance) +
                                         " resulted in an exception.", e);
                             }
@@ -474,11 +427,11 @@ public class MpContainer {
 
     public void startEvictionThread(final long evictionFrequency, final TimeUnit timeUnit) {
         if (0 == evictionFrequency || null == timeUnit) {
-            logger.warn("Eviction Thread cannot start with zero frequency or null TimeUnit {} {}", evictionFrequency, timeUnit);
+            LOGGER.warn("Eviction Thread cannot start with zero frequency or null TimeUnit {} {}", evictionFrequency, timeUnit);
             return;
         }
 
-        if (prototype != null && prototype.isEvictableSupported()) {
+        if (prototype != null && prototype.isEvictionSupported()) {
             evictionScheduler = Executors.newSingleThreadScheduledExecutor();
             evictionScheduler.scheduleWithFixedDelay(new Runnable() {
                 @Override
@@ -493,7 +446,6 @@ public class MpContainer {
     private int outputConcurrency = -1;
     private final Object lockForExecutorServiceSetter = new Object();
 
-    @Override
     public void setConcurrency(final int concurrency) {
         synchronized (lockForExecutorServiceSetter) {
             outputConcurrency = concurrency;
@@ -629,7 +581,6 @@ public class MpContainer {
         // =======================================================
     }
 
-    @Override
     public void invokeOutput() {
         final StatsCollector.TimerContext tctx = statCollector.outputInvokeStarted();
         try {
@@ -639,7 +590,6 @@ public class MpContainer {
         }
     }
 
-    @Override
     public ClusterId getClusterId() {
         return clusterId;
     }
@@ -648,40 +598,12 @@ public class MpContainer {
     // Internals
     // ----------------------------------------------------------------------------
 
-    private Object getKeyFromMessage(final Object message) throws ContainerException {
-        Object key = null;
-        try {
-            key = keyMethods.invokeGetter(message);
-        } catch (final IllegalArgumentException e) {
-            throw new ContainerException(
-                    "the container for " + clusterId + " is unable to retrieve key from message " + SafeString.objectDescription(message) +
-                            ". Are you sure that the method to retrieve the key takes no parameters?",
-                    e);
-        } catch (final IllegalAccessException e) {
-            throw new ContainerException(
-                    "the container for " + clusterId + " is unable to retrieve key from message " + SafeString.objectDescription(message) +
-                            ". Are you sure that the method to retrieve the key is publically accessible (both the class and the method must be public)?");
-        } catch (final InvocationTargetException e) {
-            throw new ContainerException(
-                    "the container for " + clusterId + " is unable to retrieve key from message " + SafeString.objectDescription(message) +
-                            " because the method to retrieve the key threw an exception.",
-                    e.getCause());
-        }
-
-        if (key == null)
-            throw new ContainerException("the container for " + clusterId + " retrieved a null message key from " +
-                    SafeString.objectDescription(message));
-        return key;
-    }
-
     ConcurrentHashMap<Object, Boolean> keysBeingWorked = new ConcurrentHashMap<Object, Boolean>();
 
     /**
      * This is required to return non null or throw a ContainerException
-     * 
-     * @throws IllegalAccessException
-     * @throws InvocationTargetException
      */
+    @SuppressWarnings("unchecked")
     public InstanceWrapper getInstanceForKey(final Object key) throws ContainerException {
         // common case has "no" contention
         InstanceWrapper wrapper = instances.get(key);
@@ -703,15 +625,10 @@ public class MpContainer {
             Object instance = null;
             try {
                 instance = prototype.newInstance();
-            } catch (final InvocationTargetException e) {
+            } catch (final DempsyException e) {
                 throw new ContainerException("the container for " + clusterId + " failed to create a new instance of " +
                         SafeString.valueOf(prototype) + " for the key " + SafeString.objectDescription(key) +
-                        " because the clone method threw an exception.", e.getCause());
-            } catch (final IllegalAccessException e) {
-                throw new ContainerException("the container for " + clusterId + " failed to create a new instance of " +
-                        SafeString.valueOf(prototype) + " for the key " + SafeString.objectDescription(key) +
-                        " because the clone method is not accessible. Is the class public? Is the clone method public? Does the class implement Cloneable?",
-                        e);
+                        " because the clone method threw an exception.", e);
             } catch (final RuntimeException e) {
                 throw new ContainerException("the container for " + clusterId + " failed to create a new instance of " +
                         SafeString.valueOf(prototype) + " for the key " + SafeString.objectDescription(key) +
@@ -725,34 +642,25 @@ public class MpContainer {
 
             // activate
             final byte[] data = null;
-            if (logger.isTraceEnabled())
-                logger.trace("the container for " + clusterId + " is activating instance " + String.valueOf(instance)
+            if (LOGGER.isTraceEnabled())
+                LOGGER.trace("the container for " + clusterId + " is activating instance " + String.valueOf(instance)
                         + " with " + ((data != null) ? data.length : 0) + " bytes of data"
                         + " via " + SafeString.valueOf(prototype));
 
             boolean activateSuccessful = false;
             try {
-                activateSuccessful = prototype.activate(instance, key, data);
+                prototype.activate(instance, key, data);
+                activateSuccessful = true;
             } catch (final IllegalArgumentException e) {
                 throw new ContainerException(
                         "the container for " + clusterId + " failed to invoke the activate method of " + SafeString.valueOf(prototype) +
                                 ". Is it declared to take a byte[]?",
                         e);
-            } catch (final IllegalAccessException e) {
+            } catch (final DempsyException e) {
                 throw new ContainerException(
                         "the container for " + clusterId + " failed to invoke the activate method of " + SafeString.valueOf(prototype) +
                                 ". Is the active method accessible - the class is public and the method is public?",
                         e);
-            } catch (final InvocationTargetException e) {
-                // If the activate can throw this exception explicitly then we want to note it on the
-                // ContainerException so that we can log appropriately at the outer level.
-                final Throwable cause = e.getCause();
-                final ContainerException toThrow = new ContainerException(
-                        "the container for " + clusterId + " failed to invoke the activate method of " + SafeString.valueOf(prototype) +
-                                " because the method itself threw an exception.",
-                        cause);
-                toThrow.setExpected(prototype.activateCanThrowChecked(cause));
-                throw toThrow;
             } catch (final RuntimeException e) {
                 throw new ContainerException(
                         "the container for " + clusterId + " failed to invoke the activate method of " + SafeString.valueOf(prototype) +
@@ -782,44 +690,39 @@ public class MpContainer {
     /**
      * helper method to invoke an operation (handle a message or run output) handling all of hte exceptions and forwarding any results.
      */
-    private void invokeOperation(final Object instance, final Operation op, final Object message) {
-        if (instance != null) // possibly passivated ...
-        {
+    private void invokeOperation(final Object instance, final Operation op, final KeyedMessage message) {
+        if (instance != null) { // possibly passivated ...
             try {
                 statCollector.messageDispatched(message);
-                final Object result = op == Operation.output ? prototype.invokeOutput(instance) : prototype.invoke(instance, message, statCollector);
+                @SuppressWarnings("unchecked")
+                final List<KeyedMessage> result = op == Operation.output ? prototype.invokeOutput(instance)
+                        : prototype.invoke(instance, message);
                 statCollector.messageProcessed(message);
                 if (result != null) {
                     dispatcher.dispatch(result);
                 }
             } catch (final ContainerException e) {
-                logger.warn("the container for " + clusterId + " failed to invoke " + op + " on the message processor " +
-                        SafeString.valueOf(prototype) + (op == Operation.handle ? (" with " + SafeString.objectDescription(message)) : ""), e);
+                LOGGER.warn("the container for " + clusterId + " failed to invoke " + op + " on the message processor " +
+                        SafeString.valueOf(prototype) + (op == Operation.handle ? (" with " + objectDescription(message)) : ""), e);
                 statCollector.messageFailed(false);
             }
             // this is an exception thrown as a result of the reflected call having an illegal argument.
             // This should actually be impossible since the container itself manages the calling.
             catch (final IllegalArgumentException e) {
-                logger.error("the container for " + clusterId + " failed when trying to invoke " + prototype.invokeDescription(op, message) +
+                LOGGER.error("the container for " + clusterId + " failed when trying to invoke " + op + " on " + objectDescription(instance) +
                         " due to a declaration problem. Are you sure the method takes the type being routed to it? If this is an output operation are you sure the output method doesn't take any arguments?",
                         e);
                 statCollector.messageFailed(true);
             }
-            // can't access the method? Did the app developer annotate it correctly?
-            catch (final IllegalAccessException e) {
-                logger.error("the container for " + clusterId + " failed when trying to invoke " + prototype.invokeDescription(op, message) +
-                        " due an access problem. Is the method public?", e);
-                statCollector.messageFailed(true);
-            }
             // The app threw an exception.
-            catch (final InvocationTargetException e) {
-                logger.warn("the container for " + clusterId + " failed when trying to invoke " + prototype.invokeDescription(op, message) +
+            catch (final DempsyException e) {
+                LOGGER.warn("the container for " + clusterId + " failed when trying to invoke " + op + " on " + objectDescription(instance) +
                         " because an exception was thrown by the Message Processeor itself.", e.getCause());
                 statCollector.messageFailed(true);
             }
             // RuntimeExceptions bookeeping
             catch (final RuntimeException e) {
-                logger.error("the container for " + clusterId + " failed when trying to invoke " + prototype.invokeDescription(op, message) +
+                LOGGER.error("the container for " + clusterId + " failed when trying to invoke " + op + " on " + objectDescription(instance) +
                         " due to an unknown exception.", e);
                 statCollector.messageFailed(false);
 
