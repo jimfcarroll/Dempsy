@@ -20,6 +20,7 @@ import java.lang.reflect.InvocationTargetException;
 import java.util.List;
 
 import net.dempsy.lifecycle.annotation.MessageKey;
+import net.dempsy.lifecycle.annotation.utils.KeyExtractor;
 
 /**
  *  <p>Implementations of this interface accept messages pushed from a source.
@@ -29,17 +30,24 @@ import net.dempsy.lifecycle.annotation.MessageKey;
  *  Dempsy framework. {@link Adaptor}s will be provided a {@link Dispatcher}, 
  *  which constitutes a handle to the Dempsy message bus.</p> 
  */
-public interface Dispatcher {
+public abstract class Dispatcher {
+    private final KeyExtractor extractor = new KeyExtractor();
+
     /**
     * An {@link Adaptor} will use this method to send a "routable message" to
     * a {@link Mp} somewhere in the Dempsy application that the
     * {@link Adaptor} is part of.
     */
-    public void dispatch(KeyedMessage message);
+    public abstract void dispatch(KeyedMessage message);
 
-    public void dispatchAnnotated(Object message) throws IllegalAccessException, IllegalArgumentException, InvocationTargetException;
+    public void dispatchAnnotated(final Object message) throws IllegalAccessException, IllegalArgumentException, InvocationTargetException {
+        if (message == null)
+            throw new NullPointerException("Cannot dispatch a null message.");
 
-    public default void dispatch(final List<KeyedMessage> messages) {
+        dispatch(extractor.extract(message));
+    }
+
+    public void dispatch(final List<KeyedMessage> messages) {
         if (messages != null)
             messages.forEach(v -> dispatch(v));
     }

@@ -185,7 +185,7 @@ public class AnnotatedMethodInvoker {
     // Internals
     // ----------------------------------------------------------------------------
 
-    public Method getInvokableMethodForClass(Class<?> valueClass) {
+    public Method getInvokableMethodForClass(final Class<?> valueClass) {
         if (valueClass == null)
             return null;
 
@@ -193,17 +193,28 @@ public class AnnotatedMethodInvoker {
         if (method != null)
             return method;
 
-        // stop recursion once we hit Object
-        valueClass = valueClass.getSuperclass();
-        if (valueClass == null)
-            return null;
+        // get the list of all classes and interfaces.
+        // first classes.
+        Class<?> clazz = valueClass.getSuperclass();
+        while (clazz != null) {
+            method = methods.get(clazz);
+            if (method != null) {
+                methods.put(valueClass, method);
+                return method;
+            }
+            clazz = clazz.getSuperclass();
+        }
 
-        // once we learn the handler method, we'll remember it to avoid future recursion
-        method = getInvokableMethodForClass(valueClass);
-        if (method != null)
-            methods.put(valueClass, method);
+        // now look through the interfaces.
+        for (final Class<?> iface : valueClass.getInterfaces()) {
+            method = methods.get(iface);
+            if (method != null) {
+                methods.put(valueClass, method);
+                return method;
+            }
+        }
 
-        return method;
+        return null;
     }
 
     public Set<Class<?>> getClassesHandled() {
@@ -245,6 +256,10 @@ public class AnnotatedMethodInvoker {
         if (ifaces != null && ifaces.length > 0)
             Arrays.stream(ifaces).forEach(iface -> ret.addAll(allTypeAnnotations(iface, annotation, recurse)));
         return ret;
+    }
+
+    public int getNumMethods() {
+        return methods.size();
     }
 
 }

@@ -29,4 +29,13 @@ public interface Receiver extends AutoCloseable {
      * A receiver is started with a Listener and a threading model.
      */
     public void start(Listener listener, ThreadingModel threadingModel) throws MessageTransportException;
+
+    /**
+     * What is a unique Id for the transport that this {@link Receiver} is associated with. This information is used
+     * by the TransportManager to look up a {@link SenderFactory} that's compatible with this {@link Receiver}. The default
+     * behavior for this method is to provide the package name of the implementing class
+     */
+    public default String transportTypeId() {
+        return this.getClass().getPackage().getName();
+    }
 }

@@ -14,25 +14,28 @@
  * limitations under the License.
  */
 
-package net.dempsy.transport;
+package net.dempsy.container.mocks;
 
-import net.dempsy.DempsyException;
+import java.io.Serializable;
 
-/**
- * General checked Exception for MessageTransport functions
- */
-public class MessageTransportException extends DempsyException {
+import net.dempsy.lifecycle.annotation.MessageKey;
+import net.dempsy.lifecycle.annotation.MessageType;
+
+@MessageType
+public class ContainerTestMessage implements Serializable {
     private static final long serialVersionUID = 1L;
 
-    public MessageTransportException(final String message) {
-        super(message);
+    public String value;
+
+    @SuppressWarnings("unused")
+    private ContainerTestMessage() {}
+
+    public ContainerTestMessage(final String value) {
+        this.value = value;
     }
 
-    public MessageTransportException(final Throwable e) {
-        super(e);
-    }
-
-    public MessageTransportException(final String message, final Throwable e) {
-        super(message, e);
+    @MessageKey
+    public String getKey() {
+        return value;
     }
 }

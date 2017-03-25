@@ -33,6 +33,7 @@ import net.dempsy.lifecycle.annotations.TestMps.TestMpNoKey;
 import net.dempsy.lifecycle.annotations.TestMps.TestMpOnlyKey;
 
 public class MessageProcessorTest {
+
     @Test
     public void testMethodHandleWithParameters() throws Throwable {
         final MessageProcessor<TestMp> helper = new MessageProcessor<TestMp>(new TestMp());

@@ -24,9 +24,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import net.dempsy.threading.ThreadingModel;
-import net.dempsy.transport.NodeAddress;
 import net.dempsy.transport.Listener;
 import net.dempsy.transport.MessageTransportException;
+import net.dempsy.transport.NodeAddress;
 import net.dempsy.transport.Receiver;
 import net.dempsy.util.SafeString;
 
@@ -102,7 +102,7 @@ public class BlockingQueueReceiver implements Runnable, Receiver {
                     if (!shutdown)
                         LOGGER.warn("Superfluous interrupt.", ie);
                 }
-            } catch (final MessageTransportException | RuntimeException err) {
+            } catch (final MessageTransportException err) {
                 LOGGER.error("Exception while handling message.", err);
             }
         }

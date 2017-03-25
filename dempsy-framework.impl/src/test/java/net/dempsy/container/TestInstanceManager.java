@@ -64,6 +64,7 @@ public class TestInstanceManager {
         }
     }
 
+    @MessageType
     public static class MessageTwo {
         private final Integer keyValue;
 
@@ -154,7 +155,6 @@ public class TestInstanceManager {
         public boolean equals(final Object o) {
             return value == ((ReturnInt) o).value;
         }
-
     }
 
     @Mp
@@ -187,6 +187,7 @@ public class TestInstanceManager {
         }
     }
 
+    @MessageType
     public static class MessageWithNullKey {
         @MessageKey
         public Integer getKey() {
@@ -209,18 +210,13 @@ public class TestInstanceManager {
         }
     }
 
-    public static class DummyDispatcher implements Dispatcher {
+    public static class DummyDispatcher extends Dispatcher {
         public KeyedMessage lastDispatched;
         public KeyExtractor ke;
 
         @Override
         public void dispatch(final KeyedMessage message) {
             this.lastDispatched = message;
-        }
-
-        @Override
-        public void dispatchAnnotated(final Object message) throws IllegalAccessException, IllegalArgumentException, InvocationTargetException {
-            dispatch(ke.extract(message));
         }
     }
 
@@ -232,7 +228,7 @@ public class TestInstanceManager {
     // Test Cases
     // ----------------------------------------------------------------------------
 
-    public Container setupContainer(final MessageProcessorLifecycle prototype) throws ContainerException {
+    public Container setupContainer(final MessageProcessorLifecycle<?> prototype) throws ContainerException {
         final DummyDispatcher dispatcher = new DummyDispatcher();
         final StatsCollector stats = new BasicStatsCollector();
 
@@ -518,11 +514,11 @@ public class TestInstanceManager {
 
     @Test(expected = ContainerException.class)
     public void testFailureNoKeyMethod() throws Exception {
-        final MpContainer dispatcher = setupContainer(new NullKeyTestMP());
-        dispatcher.getInstanceForDispatch(new MessageWithNullKey());
+        final Container dispatcher = setupContainer(new MessageProcessor<NullKeyTestMP>(new NullKeyTestMP()));
+        dispatcher.getInstanceForDispatch(km(new MessageWithNullKey()));
     }
 
-    @MessageProcessor
+    @Mp
     public static class ThrowMe implements Cloneable {
         @MessageHandler
         public void handle(final MessageOne message) {
@@ -533,14 +529,13 @@ public class TestInstanceManager {
         public Object clone() throws CloneNotSupportedException {
             return super.clone();
         }
-
     }
 
     @Test
     public void testMpThrows() throws Exception {
-        final MpContainer dispatcher = setupContainer(new ThrowMe());
+        final Container dispatcher = setupContainer(new MessageProcessor<ThrowMe>(new ThrowMe()));
 
-        dispatcher.dispatch(new MessageOne(123), true);
+        dispatcher.dispatch(km(new MessageOne(123)), true);
 
         assertEquals(1, ((MetricGetters) dispatcher.getStatsCollector()).getMessageFailedCount());
     }

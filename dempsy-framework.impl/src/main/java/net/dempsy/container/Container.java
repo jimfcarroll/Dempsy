@@ -78,8 +78,14 @@ public class Container {
     private final ClusterId clusterId;
 
     private volatile boolean isRunning = true;
+    private final Set<String> messageTypes;
 
     public Container(final MessageProcessorLifecycle<?> prototype, final ClusterId clusterId) {
+        if (clusterId == null)
+            throw new IllegalArgumentException("The container must be supplied a cluster id");
+        if (prototype == null)
+            throw new IllegalArgumentException("The container for \"" + clusterId + "\" cannot be supplied a null MessageProcessor");
+
         this.clusterId = clusterId;
         this.prototype = prototype;
 
@@ -87,7 +93,71 @@ public class Container {
 
         if (outputConcurrency > 0)
             setupOutputConcurrency();
+
+        messageTypes = prototype.messagesTypesHandled();
+        if (messageTypes == null || messageTypes.size() == 0)
+            throw new ContainerException("The cluster " + clusterId + " appears to have a MessageProcessor with no messageTypes defined.");
     }
+
+    // ----------------------------------------------------------------------------
+    // Configuration
+    // ----------------------------------------------------------------------------
+
+    public void setDispatcher(final Dispatcher dispatcher) {
+        this.dispatcher = dispatcher;
+    }
+
+    /**
+     * Set the StatsCollector. This is optional, but likely desired in a production environment. The default is to use the Coda Metrics StatsCollector with only the default JMX reporters. Production
+     * environments will likely want to export stats to a centralized monitor like Graphite or Ganglia.
+     */
+    public void setStatCollector(final StatsCollector collector) {
+        this.statCollector = collector;
+    }
+
+    // ----------------------------------------------------------------------------
+    // Monitoring / Management
+    // ----------------------------------------------------------------------------
+
+    // ----------------------------------------------------------------------------
+    // Operation
+    // ----------------------------------------------------------------------------
+
+    public void shutdown() {
+        isRunning = false;
+        if (evictionScheduler != null)
+            evictionScheduler.shutdownNow();
+
+        // the following will close up any output executor that might be running
+        setConcurrency(-1);
+    }
+
+    // ----------------------------------------------------------------------------
+    // Monitoring and Management
+    // ----------------------------------------------------------------------------
+
+    /**
+     * Returns the number of message processors controlled by this manager.
+     */
+    public int getProcessorCount() {
+        return instances.size();
+    }
+
+    // ----------------------------------------------------------------------------
+    // Test Hooks
+    // ----------------------------------------------------------------------------
+
+    protected Dispatcher getDispatcher() {
+        return dispatcher;
+    }
+
+    protected StatsCollector getStatsCollector() {
+        return statCollector;
+    }
+
+    // ----------------------------------------------------------------------------
+    // Internals
+    // ----------------------------------------------------------------------------
 
     protected static class InstanceWrapper {
         private final Object instance;
@@ -171,66 +241,6 @@ public class Container {
         }
     }
 
-    // ----------------------------------------------------------------------------
-    // Configuration
-    // ----------------------------------------------------------------------------
-
-    public void setDispatcher(final Dispatcher dispatcher) {
-        this.dispatcher = dispatcher;
-    }
-
-    /**
-     * Set the StatsCollector. This is optional, but likely desired in a production environment. The default is to use the Coda Metrics StatsCollector with only the default JMX reporters. Production
-     * environments will likely want to export stats to a centralized monitor like Graphite or Ganglia.
-     */
-    public void setStatCollector(final StatsCollector collector) {
-        this.statCollector = collector;
-    }
-
-    // ----------------------------------------------------------------------------
-    // Monitoring / Management
-    // ----------------------------------------------------------------------------
-
-    // ----------------------------------------------------------------------------
-    // Operation
-    // ----------------------------------------------------------------------------
-
-    public void shutdown() {
-        isRunning = false;
-        if (evictionScheduler != null)
-            evictionScheduler.shutdownNow();
-
-        // the following will close up any output executor that might be running
-        setConcurrency(-1);
-    }
-
-    // ----------------------------------------------------------------------------
-    // Monitoring and Management
-    // ----------------------------------------------------------------------------
-
-    /**
-     * Returns the number of message processors controlled by this manager.
-     */
-    public int getProcessorCount() {
-        return instances.size();
-    }
-
-    // ----------------------------------------------------------------------------
-    // Test Hooks
-    // ----------------------------------------------------------------------------
-
-    protected Dispatcher getDispatcher() {
-        return dispatcher;
-    }
-
-    protected StatsCollector getStatsCollector() {
-        return statCollector;
-    }
-
-    // ----------------------------------------------------------------------------
-    // Internals
-    // ----------------------------------------------------------------------------
-
     // this is called directly from tests but shouldn't be accessed otherwise.
     protected boolean dispatch(final KeyedMessage message, final boolean block) throws IllegalArgumentException {
         statCollector.messageReceived(message);
@@ -300,11 +310,27 @@ public class Container {
      * This method can return null if the instance activation explicitly returns 'false' which tells the container NOT to incorporate the new instance.
      */
     protected InstanceWrapper getInstanceForDispatch(final KeyedMessage message) throws IllegalArgumentException {
-        if (message == null)
+        if (message == null || message.message == null)
             throw new IllegalArgumentException("the container for " + clusterId + " attempted to dispatch null message.");
 
+        if (message.key == null)
+            throw new ContainerException("Message " + objectDescription(message.message) + " contains no key.");
+
+        if (message.messageTypes == null || message.messageTypes.length == 0)
+            throw new ContainerException("Message " + objectDescription(message.message) + " has no associated MessageType.");
+
         // make sure the message belongs here.
-        prototype.messagesTypesHandled();
+        boolean acceptsMessageType = false;
+        for (final String mt : message.messageTypes) {
+            if (messageTypes.contains(mt)) {
+                acceptsMessageType = true;
+                break;
+            }
+        }
+
+        if (!acceptsMessageType)
+            throw new ContainerException("The message " + objectDescription(message.message) + " doesn't appear among \"" + messageTypes
+                    + "\" which are the message types handled by " + clusterId);
 
         final Object key = message.key;
         final InstanceWrapper wrapper = getInstanceForKey(key);

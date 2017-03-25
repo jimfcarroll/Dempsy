@@ -64,7 +64,7 @@ public class MessageProcessor<T> implements MessageProcessorLifecycle<T> {
 
     private final KeyExtractor keyExtractor = new KeyExtractor();
 
-    public MessageProcessor(final T prototype) throws IllegalArgumentException {
+    public MessageProcessor(final T prototype) throws IllegalArgumentException, IllegalStateException {
         this.prototype = prototype;
         this.mpClass = prototype.getClass();
         this.mpClassName = mpClass.getName();
@@ -84,7 +84,7 @@ public class MessageProcessor<T> implements MessageProcessorLifecycle<T> {
         outputMethods = AnnotatedMethodInvoker.introspectAnnotationMultiple(mpClass, Output.class);
         evictableMethod = new MethodHandle(AnnotatedMethodInvoker.introspectAnnotationSingle(mpClass, Evictable.class));
         typesHandled = new HashSet<>(Arrays.asList(getMessageTypesFromMpClass(prototype.getClass())));
-        if (typesHandled == null || typesHandled.size() == 0)
+        if (invocationMethods.getNumMethods() > 0 && typesHandled == null || typesHandled.size() == 0)
             throw new IllegalArgumentException("Cannot have a prototype Mp that has no defined MessageTypes.");
     }
 
@@ -120,7 +120,7 @@ public class MessageProcessor<T> implements MessageProcessorLifecycle<T> {
     public List<KeyedMessage> invoke(final T instance, final KeyedMessage message) throws IllegalArgumentException, DempsyException {
 
         if (!isMessageSupported(message.message))
-            throw new IllegalArgumentException(mpClassName + ": no handler for messages of type: " + message.getClass().getName());
+            throw new IllegalArgumentException(mpClassName + ": no handler for messages of type: " + message.message.getClass().getName());
 
         final Object returnValue = wrap(() -> invocationMethods.invokeMethod(instance, message.message));
         return returnValue == null ? null : convertToKeyedMessage(returnValue);

@@ -40,54 +40,48 @@ import org.junit.Before;
 import org.junit.Test;
 import org.springframework.context.support.ClassPathXmlApplicationContext;
 
-import net.dempsy.Dispatcher;
-import net.dempsy.KeySource;
-import net.dempsy.TestUtils;
-import net.dempsy.annotations.Activation;
-import net.dempsy.annotations.Evictable;
-import net.dempsy.annotations.MessageHandler;
-import net.dempsy.annotations.MessageProcessor;
-import net.dempsy.annotations.Output;
-import net.dempsy.annotations.Passivation;
-import net.dempsy.annotations.Start;
 import net.dempsy.config.ClusterId;
+import net.dempsy.container.TestContainer.TestProcessor;
 import net.dempsy.container.mocks.ContainerTestMessage;
 import net.dempsy.container.mocks.OutputMessage;
-import net.dempsy.messagetransport.Sender;
-import net.dempsy.messagetransport.blockingqueue.BlockingQueueAdaptor;
-import net.dempsy.monitoring.coda.MetricGetters;
+import net.dempsy.lifecycle.annotation.Activation;
+import net.dempsy.lifecycle.annotation.Evictable;
+import net.dempsy.lifecycle.annotation.MessageHandler;
+import net.dempsy.lifecycle.annotation.Mp;
+import net.dempsy.lifecycle.annotation.Output;
+import net.dempsy.lifecycle.annotation.Passivation;
+import net.dempsy.lifecycle.annotation.Start;
+import net.dempsy.messages.Dispatcher;
+import net.dempsy.messages.KeySource;
+import net.dempsy.messages.KeyedMessage;
 import net.dempsy.router.RoutingStrategy;
-import net.dempsy.serialization.Serializer;
-import net.dempsy.serialization.java.JavaSerializer;
+import net.dempsy.transport.Sender;
 
 //
 // NOTE: this test simply puts messages on an input queue, and expects
 //       messages on an output queue; the important part is the wiring
 //       in TestMPContainer.xml
 //
-public class TestMpContainer {
+public class TestContainer {
     // ----------------------------------------------------------------------------
     // Configuration
     // ----------------------------------------------------------------------------
 
-    private MpContainer container;
+    private Container container;
     private BlockingQueue<Object> inputQueue;
     private BlockingQueue<Object> outputQueue;
-    private final Serializer serializer = new JavaSerializer();
 
     private ClassPathXmlApplicationContext context;
     private final long baseTimeoutMillis = 20000;
 
-    public static class DummyDispatcher implements Dispatcher {
+    public static class DummyDispatcher extends Dispatcher {
         public Object lastDispatched;
 
         public Sender sender;
 
-        public Serializer serializer = new JavaSerializer();
-
         @Override
-        public void dispatch(final Object message) {
-            this.lastDispatched = message;
+        public void dispatch(final KeyedMessage message) {
+            this.lastDispatched = message == null ? null : message.message;
             try {
                 sender.send(serializer.serialize(message));
             } catch (final Exception e) {
@@ -95,11 +89,6 @@ public class TestMpContainer {
                 e.printStackTrace();
                 throw new RuntimeException(e);
             }
-        }
-
-        @Override
-        public ClusterId getThisClusterId() {
-            return null;
         }
 
         public void setSender(final Sender sender) {
@@ -115,8 +104,8 @@ public class TestMpContainer {
     @SuppressWarnings("unchecked")
     public void setUp(final String failFast) throws Exception {
         System.setProperty("failFast", failFast);
-        context = new ClassPathXmlApplicationContext("TestMPContainer.xml");
-        container = (MpContainer) context.getBean("container");
+        context = new ClassPathXmlApplicationContext("classpath:/spring/container/test-container.xml");
+        container = (Container) context.getBean("container");
         assertNotNull(container.getSerializer());
         inputQueue = (BlockingQueue<Object>) context.getBean("inputQueue");
         outputQueue = (BlockingQueue<Object>) context.getBean("outputQueue");
@@ -137,7 +126,7 @@ public class TestMpContainer {
     // Message and MP classes
     // ----------------------------------------------------------------------------
 
-    @MessageProcessor
+    @Mp
     public static class TestProcessor implements Cloneable {
         public volatile String myKey;
         public volatile int activationCount;

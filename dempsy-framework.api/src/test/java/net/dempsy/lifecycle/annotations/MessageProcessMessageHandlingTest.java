@@ -5,6 +5,7 @@ import static org.junit.Assert.assertNotNull;
 
 import java.lang.reflect.InvocationTargetException;
 import java.util.List;
+import java.util.Set;
 
 import org.junit.Rule;
 import org.junit.Test;
@@ -67,8 +68,8 @@ public class MessageProcessMessageHandlingTest {
                 new TestMpWithMultiLevelMessageTypeParameter());
         helper.validate();
 
-        final String[] mts = helper.messagesTypesHandled();
-        assertEquals(1, mts.length);
+        final Set<String> mts = helper.messagesTypesHandled();
+        assertEquals(1, mts.size());
 
         exception.expect(IllegalArgumentException.class);
         exception.expectMessage("no handler for messages of type");
