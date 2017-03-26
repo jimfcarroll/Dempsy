@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -18,6 +19,8 @@ import net.dempsy.config.ClusterId;
 import net.dempsy.config.Node;
 import net.dempsy.container.Container;
 import net.dempsy.messages.Adaptor;
+import net.dempsy.router.RoutingStrategy;
+import net.dempsy.router.RoutingStrategy.Inbound;
 import net.dempsy.transport.NodeAddress;
 import net.dempsy.transport.Receiver;
 import net.dempsy.util.SafeString;
@@ -30,7 +33,7 @@ public class NodeManager implements Infrastructure {
 
     private Node node = null;
     private ClusterInfoSession session;
-    private final List<Container> containers = new ArrayList<>();
+    private final List<PerContainer> containers = new ArrayList<>();
     private final List<Adaptor> adaptors = new ArrayList<>();
     private Router router = null;
     private final AutoDisposeSingleThreadScheduler persistenceScheduler = new AutoDisposeSingleThreadScheduler("Dempsy-pestering-");
@@ -60,6 +63,7 @@ public class NodeManager implements Infrastructure {
     public NodeManager start() throws DempsyException {
         validate();
 
+        // =====================================
         // set the dispatcher on adaptors and create containers for mp clusters
         node.getClusters().forEach(c -> {
             if (c.isAdaptor()) {
@@ -69,29 +73,28 @@ public class NodeManager implements Infrastructure {
             } else {
                 final Container con = new Container(c.getMessageProcessor(), c.getClusterId());
                 con.setDispatcher(router);
-                containers.add(con);
+
+                // TODO: This is a hack for now.
+                final Manager<RoutingStrategy.Inbound> inboundManager = new Manager<RoutingStrategy.Inbound>(RoutingStrategy.Inbound.class);
+                final RoutingStrategy.Inbound is = inboundManager.getAssociatedSenderFactory(c.getRoutingStrategyId());
+                containers.add(new PerContainer(con, is));
             }
         });
+        // =====================================
 
         // =====================================
         // register node with session
         // =====================================
         // first gather node information
         final Receiver receiver = (Receiver) node.getReceiver();
-
         final NodeAddress nodeAddress = receiver.getAddress();
-
         final String nodeId = nodeAddress.getGuid();
-
         final Map<ClusterId, Set<String>> messageTypesByClusterId = new HashMap<>();
-
         node.getClusters().forEach(c -> messageTypesByClusterId.put(c.getClusterId(), c.getMessageProcessor().messagesTypesHandled()));
-
         final NodeInformation nodeInfo = new NodeInformation(receiver.transportTypeId(), nodeAddress, messageTypesByClusterId);
 
         // Then actually register
         keepNodeRegstered = new PersistentTask(LOGGER, isRunning, persistenceScheduler, RETRY_PERIOND_MILLIS) {
-
             @Override
             public boolean execute() {
                 try {
@@ -127,7 +130,7 @@ public class NodeManager implements Infrastructure {
     }
 
     public List<Container> getContainers() {
-        return Collections.unmodifiableList(containers);
+        return Collections.unmodifiableList(containers.stream().map(pc -> pc.container).collect(Collectors.toList()));
     }
 
     public NodeManager validate() throws DempsyException {
@@ -160,6 +163,16 @@ public class NodeManager implements Infrastructure {
     @Override
     public RootPaths getRootPaths() {
         return rootPaths;
+    }
+
+    private static class PerContainer {
+        final Container container;
+        final RoutingStrategy.Inbound inboundStrategy;
+
+        public PerContainer(final Container container, final Inbound inboundStrategy) {
+            this.container = container;
+            this.inboundStrategy = inboundStrategy;
+        }
     }
 
     private static String root(final String application) {

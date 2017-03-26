@@ -99,7 +99,7 @@ public class TestConfig {
 
     @Test
     public void testSimpleConfig() throws Throwable {
-        final Node node = new Node("test").setDefaultRoutingStrategy(new Object());
+        final Node node = new Node("test").setDefaultRoutingStrategyId("");
         final Cluster cd = new Cluster("test-slot");
         cd.setMessageProcessor(new MessageProcessor<GoodTestMp>(new GoodTestMp()));
 
@@ -109,20 +109,20 @@ public class TestConfig {
         node.validate(); // this throws if there's a problem.
 
         assertNull(node.getReceiver());
-        assertNotNull(cd.getRoutingStrategy());
+        assertNotNull(cd.getRoutingStrategyId());
         assertNull(node.getStatsCollector());
     }
 
     @Test
     public void testSimpleConfigBuilder() throws Throwable {
-        final Node node = new Node("test").setDefaultRoutingStrategy(new Object());
+        final Node node = new Node("test").setDefaultRoutingStrategyId("");
         final Cluster cd = node.cluster("test-slot").mp(new MessageProcessor<GoodTestMp>(new GoodTestMp()));
 
         // if we get to here without an error we should be okay
         node.validate(); // this throws if there's a problem.
 
         assertNull(node.getReceiver());
-        assertNotNull(cd.getRoutingStrategy());
+        assertNotNull(cd.getRoutingStrategyId());
         assertNull(node.getStatsCollector());
     }
 
@@ -131,10 +131,10 @@ public class TestConfig {
         final List<Cluster> clusterDefs = new ArrayList<Cluster>();
 
         Object appSer;
-        Object appRs;
+        String appRs;
         Object appSc;
         final Node node = new Node("test").receiver(appSer = new Object())
-                .setStatsCollector(appSc = new Object()).setDefaultRoutingStrategy(appRs = new Object());
+                .setStatsCollector(appSc = new Object()).setDefaultRoutingStrategyId(appRs = "a");
 
         Cluster cd = new Cluster("test-slot1").setAdaptor(new GoodAdaptor());
         clusterDefs.add(cd);
@@ -154,9 +154,9 @@ public class TestConfig {
         cd = new Cluster("test-slot5").setMessageProcessor(new MessageProcessor<GoodTestMp>(new GoodTestMp()));
         clusterDefs.add(cd);
 
-        final Object clusRs = new Object();
+        final String clusRs = "c";
         cd = new Cluster("test-slot6").setMessageProcessor(new MessageProcessor<GoodTestMp>(new GoodTestMp()))
-                .setRoutingStrategy(clusRs);
+                .setRoutingStrategyId(clusRs);
         clusterDefs.add(cd);
 
         cd = new Cluster("test-slot1.5").adaptor(new GoodAdaptor());
@@ -178,9 +178,9 @@ public class TestConfig {
 
         assertEquals(appSer, node.getReceiver());
 
-        assertEquals(appRs, node.getDefaultRoutingStrategy());
+        assertEquals(appRs, node.getDefaultRoutingStrategyId());
 
-        assertEquals(clusRs, node.getClusters().get(5).getRoutingStrategy());
+        assertEquals(clusRs, node.getClusters().get(5).getRoutingStrategyId());
 
         assertEquals(new ClusterId("test", "test-slot1"), node.getClusters().get(0).getClusterId());
         assertEquals(appSc, node.getStatsCollector());
@@ -190,12 +190,12 @@ public class TestConfig {
     public void testConfigBuilder() throws Throwable {
 
         Object appSer;
-        final Object appRs;
+        String appRs;
         Object appScf;
-        Object clusRs;
+        String clusRs;
         final Node app = new Node("test")
                 .receiver(appSer = new Object())
-                .defaultRoutingStrategy(appRs = new Object())
+                .defaultRoutingStrategyId(appRs = "s")
                 .statsCollector(appScf = new Object());
 
         app.cluster("test-slot1").adaptor(new GoodAdaptor());
@@ -203,7 +203,7 @@ public class TestConfig {
         app.cluster("test-slot3").mp(new MessageProcessor<GoodTestMp>(new GoodTestMp())).destination("test-slot4", "test-slot5");
         app.cluster("test-slot4").mp(new MessageProcessor<GoodTestMp>(new GoodTestMp()));
         app.cluster("test-slot5").mp(new MessageProcessor<GoodTestMp>(new GoodTestMp()));
-        app.cluster("test-slot6").mp(new MessageProcessor<GoodTestMp>(new GoodTestMp())).routing(clusRs = new Object());
+        app.cluster("test-slot6").mp(new MessageProcessor<GoodTestMp>(new GoodTestMp())).routing(clusRs = "c");
         app.cluster("test-slot1.5").adaptor(new GoodAdaptor());
 
         assertNotNull(app.getCluster(new ClusterId("test", "test-slot1.5")).getAdaptor());
@@ -222,9 +222,9 @@ public class TestConfig {
 
         assertEquals(appSer, app.getReceiver());
 
-        assertEquals(appRs, app.getDefaultRoutingStrategy());
+        assertEquals(appRs, app.getDefaultRoutingStrategyId());
 
-        assertEquals(clusRs, app.getClusters().get(5).getRoutingStrategy());
+        assertEquals(clusRs, app.getClusters().get(5).getRoutingStrategyId());
 
         assertEquals(new ClusterId("test", "test-slot1"), app.getClusters().get(0).getClusterId());
 
@@ -275,7 +275,7 @@ public class TestConfig {
 
     @Test(expected = IllegalStateException.class)
     public void testDupCluster() throws Throwable {
-        final Node app = new Node("test-tooMuchWine-needMore").setDefaultRoutingStrategy(new Object());
+        final Node app = new Node("test-tooMuchWine-needMore").setDefaultRoutingStrategyId("");
         app.setClusters(
                 new Cluster("notTheSame").setAdaptor(new GoodAdaptor()),
                 new Cluster("mp-stage1").setMessageProcessor(new MessageProcessor<GoodTestMp>(new GoodTestMp())),
@@ -287,7 +287,7 @@ public class TestConfig {
 
     @Test(expected = IllegalStateException.class)
     public void testDupClusterBuilder() throws Throwable {
-        final Node node = new Node("test-tooMuchWine-needMore").defaultRoutingStrategy(new Object());
+        final Node node = new Node("test-tooMuchWine-needMore").defaultRoutingStrategyId("");
         node.cluster("notTheSame").adaptor(new GoodAdaptor());
         node.cluster("mp-stage1").mp(new MessageProcessor<GoodTestMp>(new GoodTestMp()));
         node.cluster("mp-stage2-dupped").mp(new MessageProcessor<GoodTestMp>(new GoodTestMp()));
@@ -298,7 +298,7 @@ public class TestConfig {
 
     @Test
     public void testSimpleConfigWithKeyStore() throws Throwable {
-        final Node app = new Node("test").defaultRoutingStrategy(new Object());
+        final Node app = new Node("test").defaultRoutingStrategyId("");
         final Cluster cd = new Cluster("test-slot");
         cd.setMessageProcessor(new MessageProcessor<GoodTestMp>(new GoodTestMp()));
         cd.setKeySource(new KeySource<Object>() {
@@ -313,7 +313,7 @@ public class TestConfig {
 
     @Test
     public void testSimpleConfigWithKeyStoreBuilder() throws Throwable {
-        final Node node = new Node("test").defaultRoutingStrategy(new Object());
+        final Node node = new Node("test").defaultRoutingStrategyId("");
         node.cluster("test-slot").mp(new MessageProcessor<GoodTestMp>(new GoodTestMp()))
                 .keySource(new KeySource<Object>() {
                     @Override
@@ -326,7 +326,7 @@ public class TestConfig {
 
     @Test(expected = IllegalStateException.class)
     public void testConfigAdaptorWithKeyStore() throws Throwable {
-        final Node app = new Node("test").defaultRoutingStrategy(new Object());
+        final Node app = new Node("test").defaultRoutingStrategyId("");
         final Cluster cd = new Cluster("test-slot");
         cd.setAdaptor(new Adaptor() {
             @Override
@@ -349,7 +349,7 @@ public class TestConfig {
 
     @Test(expected = IllegalStateException.class)
     public void testConfigAdaptorWithKeyStoreBuilder() throws Throwable {
-        final Node node = new Node("test").defaultRoutingStrategy(new Object());
+        final Node node = new Node("test").defaultRoutingStrategyId("");
         node.cluster("test-slot").adaptor(new Adaptor() {
             @Override
             public void stop() {}
@@ -370,7 +370,7 @@ public class TestConfig {
 
     @Test
     public void testConfigMpWithGoodMPEvict() throws Throwable {
-        final Node app = new Node("test").defaultRoutingStrategy(new Object());
+        final Node app = new Node("test").defaultRoutingStrategyId("");
         final Cluster cd = new Cluster("test-slot");
 
         @Mp
@@ -419,7 +419,7 @@ public class TestConfig {
             }
         }
 
-        final Node node = new Node("test").setDefaultRoutingStrategy(new Object());
+        final Node node = new Node("test").setDefaultRoutingStrategyId("");
         node.cluster("slot").mp(new MessageProcessor<mp>(new mp()));
         node.validate();
     }

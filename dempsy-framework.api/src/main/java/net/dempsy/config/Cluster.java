@@ -37,7 +37,7 @@ public class Cluster {
     private ClusterId clusterId;
     private MessageProcessorLifecycle<?> mp = null;
     private Adaptor adaptor = null;
-    private Object routingStrategy;
+    private String routingStrategyId;
     private ClusterId[] destinations = {};
 
     private KeySource<?> keySource = null;
@@ -102,8 +102,8 @@ public class Cluster {
         return this;
     }
 
-    public Cluster routing(final Object routingStrategy) {
-        this.routingStrategy = routingStrategy;
+    public Cluster routing(final String routingStrategyId) {
+        this.routingStrategyId = routingStrategyId;
         return this;
     }
 
@@ -160,12 +160,12 @@ public class Cluster {
         return destination(destinations);
     }
 
-    public Object getRoutingStrategy() {
-        return routingStrategy;
+    public String getRoutingStrategyId() {
+        return routingStrategyId;
     }
 
-    public Cluster setRoutingStrategy(final Object routingStrategy) {
-        return routing(routingStrategy);
+    public Cluster setRoutingStrategyId(final String routingStrategyId) {
+        return routing(routingStrategyId);
     }
 
     public Cluster setMessageProcessor(final MessageProcessorLifecycle<?> mp) {
@@ -219,7 +219,7 @@ public class Cluster {
         if (adaptor != null && keySource != null)
             throw new IllegalStateException("A dempsy cluster can not pre-instantation an adaptor.");
 
-        if (routingStrategy == null)
+        if (routingStrategyId == null)
             throw new IllegalStateException("No routing strategy set for " + clusterId + ". This should be set on the "
                     + Cluster.class.getSimpleName() + " or on the " + Node.class.getSimpleName());
     }

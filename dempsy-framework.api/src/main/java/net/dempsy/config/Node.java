@@ -21,7 +21,7 @@ public class Node {
 
     private Object statsCollector = null;
 
-    private Object defaultRoutingStrategy = null;
+    private String defaultRoutingStrategyId = null;
 
     private Object receiver = null;
 
@@ -52,8 +52,8 @@ public class Node {
         return this;
     }
 
-    public Node defaultRoutingStrategy(final Object rs) {
-        this.defaultRoutingStrategy = rs;
+    public Node defaultRoutingStrategyId(final String rs) {
+        this.defaultRoutingStrategyId = rs;
         return this;
     }
 
@@ -109,12 +109,12 @@ public class Node {
         return getCluster(new ClusterId(application, clusterId));
     }
 
-    public Node setDefaultRoutingStrategy(final Object rs) {
-        return defaultRoutingStrategy(rs);
+    public Node setDefaultRoutingStrategyId(final String rs) {
+        return defaultRoutingStrategyId(rs);
     }
 
-    public Object getDefaultRoutingStrategy() {
-        return defaultRoutingStrategy;
+    public Object getDefaultRoutingStrategyId() {
+        return defaultRoutingStrategyId;
     }
 
     public Node setStatsCollector(final Object statsCollector) {
@@ -165,7 +165,7 @@ public class Node {
 
     private void fillout(final Cluster cd) {
         cd.setAppName(application);
-        if (defaultRoutingStrategy != null && cd.getRoutingStrategy() == null)
-            cd.setRoutingStrategy(defaultRoutingStrategy);
+        if (defaultRoutingStrategyId != null && cd.getRoutingStrategyId() == null)
+            cd.setRoutingStrategyId(defaultRoutingStrategyId);
     }
 }

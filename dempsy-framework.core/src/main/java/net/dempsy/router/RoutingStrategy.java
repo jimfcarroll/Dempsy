@@ -36,5 +36,9 @@ public interface RoutingStrategy {
         public ContainerAddress selectDestinationForMessage(KeyedMessageWithType message);
     }
 
-    public static interface Inbound extends Service {}
+    public static interface Inbound extends Service {
+        public default String routingStrategyTypeId() {
+            return this.getClass().getPackage().getName();
+        }
+    }
 }

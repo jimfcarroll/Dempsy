@@ -276,8 +276,7 @@ public class Container {
                             if (block) {
                                 Thread.yield();
                                 evictedAndBlocking = true; // we're going to try again.
-                            } else // otherwise it's just like we couldn't get the lock. The Mp is busy being killed off.
-                            {
+                            } else { // otherwise it's just like we couldn't get the lock. The Mp is busy being killed off.
                                 if (LOGGER.isTraceEnabled())
                                     LOGGER.trace("the container for " + clusterId + " failed handle message due to evicted Mp "
                                             + SafeString.valueOf(prototype));

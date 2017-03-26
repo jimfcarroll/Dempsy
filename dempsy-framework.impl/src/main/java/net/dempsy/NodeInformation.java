@@ -12,20 +12,20 @@ public class NodeInformation implements Serializable {
     private static final long serialVersionUID = 1L;
     public final String transportTypeId;
     public final NodeAddress nodeAddress;
-    public final Map<ClusterId, Set<String>> messageTypesByClusterId;
+    public final Map<ClusterId, Set<String>> clusterInfoByClusterId;
 
     public NodeInformation(final String transportTypeId, final NodeAddress nodeAddress,
             final Map<ClusterId, Set<String>> messageTypesByClusterId) {
         this.transportTypeId = transportTypeId;
         this.nodeAddress = nodeAddress;
-        this.messageTypesByClusterId = Collections.unmodifiableMap(messageTypesByClusterId);
+        this.clusterInfoByClusterId = Collections.unmodifiableMap(messageTypesByClusterId);
     }
 
     @Override
     public int hashCode() {
         final int prime = 31;
         int result = 1;
-        result = prime * result + ((messageTypesByClusterId == null) ? 0 : messageTypesByClusterId.hashCode());
+        result = prime * result + ((clusterInfoByClusterId == null) ? 0 : clusterInfoByClusterId.hashCode());
         result = prime * result + ((nodeAddress == null) ? 0 : nodeAddress.hashCode());
         result = prime * result + ((transportTypeId == null) ? 0 : transportTypeId.hashCode());
         return result;
@@ -38,10 +38,10 @@ public class NodeInformation implements Serializable {
         if (getClass() != obj.getClass())
             return false;
         final NodeInformation other = (NodeInformation) obj;
-        if (messageTypesByClusterId == null) {
-            if (other.messageTypesByClusterId != null)
+        if (clusterInfoByClusterId == null) {
+            if (other.clusterInfoByClusterId != null)
                 return false;
-        } else if (!messageTypesByClusterId.equals(other.messageTypesByClusterId))
+        } else if (!clusterInfoByClusterId.equals(other.clusterInfoByClusterId))
             return false;
         if (nodeAddress == null) {
             if (other.nodeAddress != null)
