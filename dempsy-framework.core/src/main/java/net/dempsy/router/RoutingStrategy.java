@@ -16,20 +16,25 @@
 
 package net.dempsy.router;
 
+import net.dempsy.Service;
+import net.dempsy.messages.KeyedMessageWithType;
 import net.dempsy.transport.NodeAddress;
 
 public interface RoutingStrategy {
 
-    public static class MpContainerAddress {
+    public static class ContainerAddress {
         public final NodeAddress node;
         public final int cluster;
 
-        public MpContainerAddress(final NodeAddress node, final int cluster) {
+        public ContainerAddress(final NodeAddress node, final int cluster) {
             this.node = node;
             this.cluster = cluster;
         }
     }
 
-    public MpContainerAddress selectDestinationForMessage(Object messageKey, Object message);
+    public static interface Outbound extends Service {
+        public ContainerAddress selectDestinationForMessage(KeyedMessageWithType message);
+    }
 
+    public static interface Inbound extends Service {}
 }

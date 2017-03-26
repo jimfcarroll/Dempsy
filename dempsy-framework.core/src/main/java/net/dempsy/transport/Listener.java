@@ -21,18 +21,18 @@ package net.dempsy.transport;
  * This is the core abstraction for receiving messages. The client side of a transport implementation (called an "Adaptor") needs to be wired to a MessageTransportListener
  * </p>
  */
-public interface Listener extends AutoCloseable {
+public interface Listener<T> extends AutoCloseable {
     /**
      * <p>
      * Method that accepts the callback for received messages. Given that the transport is responsible for managing threads, the transport will also let the Listener implementation know if it should make every
      * effort to handle the request or if it should "fail-fast."
      * </p>
      * 
-     * @param messageBytes
-     *            The message bytes received
+     * @param message
+     *            The message received
      * @throws MessageTransportException
      */
-    public boolean onMessage(byte[] messageBytes) throws MessageTransportException;
+    public boolean onMessage(T message) throws MessageTransportException;
 
     @Override
     public default void close() {}

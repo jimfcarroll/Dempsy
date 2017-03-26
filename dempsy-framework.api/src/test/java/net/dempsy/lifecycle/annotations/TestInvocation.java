@@ -36,7 +36,7 @@ import net.dempsy.lifecycle.annotation.Mp;
 import net.dempsy.lifecycle.annotation.Output;
 import net.dempsy.lifecycle.annotation.Passivation;
 import net.dempsy.lifecycle.annotation.utils.KeyExtractor;
-import net.dempsy.messages.KeyedMessage;
+import net.dempsy.messages.KeyedMessageWithType;
 import net.dempsy.messages.MessageProcessorLifecycle;
 
 /**
@@ -215,7 +215,7 @@ public class TestInvocation {
         }
     }
 
-    private static KeyedMessage km(final Object message) throws IllegalAccessException, IllegalArgumentException, InvocationTargetException {
+    private static KeyedMessageWithType km(final Object message) throws IllegalAccessException, IllegalArgumentException, InvocationTargetException {
         return new KeyExtractor().extract(message).get(0);
     }
 

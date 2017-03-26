@@ -20,20 +20,15 @@ import java.util.HashMap;
 import java.util.Map;
 
 import net.dempsy.monitoring.StatsCollector;
-import net.dempsy.transport.NodeAddress;
 import net.dempsy.transport.MessageTransportException;
+import net.dempsy.transport.NodeAddress;
 import net.dempsy.transport.Sender;
 import net.dempsy.transport.SenderFactory;
 
 public class BlockingQueueSenderFactory implements SenderFactory {
     private final Map<NodeAddress, BlockingQueueSender> senders = new HashMap<NodeAddress, BlockingQueueSender>();
-    private final StatsCollector statsCollector;
-    private final boolean blocking;
-
-    public BlockingQueueSenderFactory(final boolean blocking, final StatsCollector statsCollector) {
-        this.statsCollector = statsCollector;
-        this.blocking = blocking;
-    }
+    private StatsCollector statsCollector;
+    private boolean blocking = true;
 
     @Override
     public synchronized Sender getSender(final NodeAddress destination) throws MessageTransportException {
@@ -52,4 +47,13 @@ public class BlockingQueueSenderFactory implements SenderFactory {
             sender.close();
     }
 
+    @Override
+    public void setStatsCollector(final StatsCollector statsCollector) {
+        this.statsCollector = statsCollector;
+    }
+
+    public BlockingQueueSenderFactory setBlocking(final boolean blocking) {
+        this.blocking = blocking;
+        return this;
+    }
 }

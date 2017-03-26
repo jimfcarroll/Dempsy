@@ -19,7 +19,6 @@ package net.dempsy.transport;
 import net.dempsy.threading.ThreadingModel;
 
 public interface Receiver extends AutoCloseable {
-
     /**
      * What address can a Sender use to send messages to this receiver.
      */

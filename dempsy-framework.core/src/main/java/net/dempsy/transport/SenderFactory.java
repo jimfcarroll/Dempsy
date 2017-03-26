@@ -16,11 +16,15 @@
 
 package net.dempsy.transport;
 
+import net.dempsy.monitoring.StatsCollector;
+
 /**
  * Abstraction to create multiple sender based on destination.
  */
 public interface SenderFactory extends AutoCloseable {
 
     public Sender getSender(NodeAddress destination) throws MessageTransportException;
+
+    public void setStatsCollector(StatsCollector statsCollector);
 
 }

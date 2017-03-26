@@ -1,9 +1,10 @@
 package net.dempsy.lifecycle.simple;
 
+import net.dempsy.messages.KeyedMessageWithType;
 import net.dempsy.messages.KeyedMessage;
 
 public interface Mp {
-    public KeyedMessage[] handle(KeyedMessage message);
+    public KeyedMessageWithType[] handle(KeyedMessage message);
 
     public default boolean evictable() {
         return false;
@@ -17,7 +18,7 @@ public interface Mp {
         return false;
     }
 
-    public default KeyedMessage[] output() {
+    public default KeyedMessageWithType[] output() {
         return null;
     }
 

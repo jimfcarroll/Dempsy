@@ -24,6 +24,7 @@ import static org.junit.Assert.assertTrue;
 import org.junit.Test;
 
 import net.dempsy.lifecycle.annotation.MessageKey;
+import net.dempsy.messages.KeyedMessageWithType;
 import net.dempsy.messages.KeyedMessage;
 
 public class SimpleMessageProcessorTest {
@@ -123,7 +124,7 @@ public class SimpleMessageProcessorTest {
         private boolean passivateCalled = false;
 
         @Override
-        public KeyedMessage[] handle(final KeyedMessage val) {
+        public KeyedMessageWithType[] handle(final KeyedMessage val) {
             return null;
         }
 
@@ -152,7 +153,7 @@ public class SimpleMessageProcessorTest {
         private boolean passivateCalled = false;
 
         @Override
-        public KeyedMessage[] handle(final KeyedMessage val) {
+        public KeyedMessageWithType[] handle(final KeyedMessage val) {
             return null;
         }
 
@@ -181,7 +182,7 @@ public class SimpleMessageProcessorTest {
         private boolean passivateCalled = false;
 
         @Override
-        public KeyedMessage[] handle(final KeyedMessage val) {
+        public KeyedMessageWithType[] handle(final KeyedMessage val) {
             return null;
         }
 
@@ -210,7 +211,7 @@ public class SimpleMessageProcessorTest {
         private boolean passivateCalled = false;
 
         @Override
-        public KeyedMessage[] handle(final KeyedMessage val) {
+        public KeyedMessageWithType[] handle(final KeyedMessage val) {
             return null;
         }
 
@@ -239,7 +240,7 @@ public class SimpleMessageProcessorTest {
         private boolean passivateCalled = false;
 
         @Override
-        public KeyedMessage[] handle(final KeyedMessage val) {
+        public KeyedMessageWithType[] handle(final KeyedMessage val) {
             return null;
         }
 
@@ -268,7 +269,7 @@ public class SimpleMessageProcessorTest {
         private final boolean passivateCalled = false;
 
         @Override
-        public KeyedMessage[] handle(final KeyedMessage val) {
+        public KeyedMessageWithType[] handle(final KeyedMessage val) {
             return null;
         }
 
@@ -315,7 +316,7 @@ public class SimpleMessageProcessorTest {
         private final boolean passivateCalled = false;
 
         @Override
-        public KeyedMessage[] handle(final KeyedMessage val) {
+        public KeyedMessageWithType[] handle(final KeyedMessage val) {
             return null;
         }
 

@@ -2,13 +2,11 @@ package net.dempsy.config;
 
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
-import net.dempsy.serialization.Serializer;
 import net.dempsy.util.SafeString;
 
 /**
@@ -17,18 +15,24 @@ import net.dempsy.util.SafeString;
 public class Node {
     private static final String DEFAULT_APP = "default";
 
-    private final String application;
+    public final String application;
+
     private final List<Cluster> clusters = new ArrayList<>();
-    private Serializer serializer = null;
+
     private Object statsCollector = null;
 
     private Object defaultRoutingStrategy = null;
+
+    private Object receiver = null;
 
     private boolean configed = false;
 
     public Node(final String applicationName) {
         if (applicationName == null)
             throw new IllegalArgumentException("You must set the application name while configuring a Dempsy application.");
+
+        if (applicationName.contains("/") || applicationName.contains("\\"))
+            throw new IllegalArgumentException("The application name must not contain slashes. The one provided is \"" + applicationName + "\"");
 
         this.application = applicationName;
     }
@@ -41,11 +45,6 @@ public class Node {
         final Cluster ret = new Cluster(application, clusterName);
         clusters.add(ret);
         return ret;
-    }
-
-    public Node serializer(final Serializer serializer) {
-        this.serializer = serializer;
-        return this;
     }
 
     public Node statsCollector(final Object statsCollector) {
@@ -65,13 +64,18 @@ public class Node {
         }
         return this;
     }
+
+    public Node receiver(final Object receiver) {
+        this.receiver = receiver;
+        return this;
+    }
     // =======================================================================
 
     public Node setClusters(final Cluster... defs) {
         return setClusters(Arrays.asList(defs));
     }
 
-    public Node setClusters(final Collection<Cluster> defs) {
+    public Node setClusters(final List<Cluster> defs) {
         if (defs == null)
             throw new IllegalArgumentException("Cannot pass a null set of " + Cluster.class.getSimpleName() + "s.");
         if (defs.size() == 0)
@@ -105,14 +109,6 @@ public class Node {
         return getCluster(new ClusterId(application, clusterId));
     }
 
-    public Node setSerializer(final Serializer ser) {
-        return serializer(ser);
-    }
-
-    public Serializer getSerializer() {
-        return serializer;
-    }
-
     public Node setDefaultRoutingStrategy(final Object rs) {
         return defaultRoutingStrategy(rs);
     }
@@ -127,6 +123,15 @@ public class Node {
 
     public Object getStatsCollector() {
         return statsCollector;
+    }
+
+    public Object getReceiver() {
+        return receiver;
+    }
+
+    public Node setReceiver(final Object receiver) {
+        this.receiver = receiver;
+        return this;
     }
 
     public void validate() throws IllegalStateException {
@@ -153,6 +158,9 @@ public class Node {
 
             clusterDef.validate();
         }
+
+        if (receiver == null)
+            throw new IllegalStateException("Cannot have a null reciever on a " + Node.class.getSimpleName());
     }
 
     private void fillout(final Cluster cd) {

@@ -21,11 +21,6 @@
        <artifactId>dempsy-serialization.api</artifactId>
      </dependency>
      <dependency>
-       <groupId>net.dempsy</groupId>
-       <artifactId>dempsy-serialization.java</artifactId>
-       <scope>test</scope>
-     </dependency>
-     <dependency>
        <groupId>org.slf4j</groupId>
        <artifactId>slf4j-log4j12</artifactId>
        <scope>test</scope>

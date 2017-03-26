@@ -34,7 +34,7 @@ import net.dempsy.transport.Sender;
  */
 public class BlockingQueueSender implements Sender {
 
-    private final BlockingQueue<byte[]> queue;
+    private final BlockingQueue<Object> queue;
     private final StatsCollector statsCollector;
     private final boolean blocking;
     private final AtomicBoolean shutdown = new AtomicBoolean(false);
@@ -56,13 +56,13 @@ public class BlockingQueueSender implements Sender {
      * @param blocking
      *            is whether or not to set this queue to blocking. It can be changed after a queue is started but there is no synchronization around the checking in the send method.
      */
-    public BlockingQueueSender(final BlockingQueue<byte[]> queue, final boolean blocking, final StatsCollector statsCollector) {
+    public BlockingQueueSender(final BlockingQueue<Object> queue, final boolean blocking, final StatsCollector statsCollector) {
         this.statsCollector = statsCollector;
         this.queue = queue;
         this.blocking = blocking;
     }
 
-    public BlockingQueueSender(final BlockingQueue<byte[]> queue) {
+    public BlockingQueueSender(final BlockingQueue<Object> queue) {
         this(queue, true, null);
     }
 
@@ -70,16 +70,16 @@ public class BlockingQueueSender implements Sender {
      * Send a message into the BlockingQueueAdaptor.
      */
     @Override
-    public void send(final byte[] messageBytes) throws MessageTransportException {
+    public void send(final Object message) throws MessageTransportException {
         if (shutdown.get())
             throw new MessageTransportException("send called on shutdown queue.");
 
         if (blocking) {
             while (true) {
                 try {
-                    queue.put(messageBytes);
+                    queue.put(message);
                     if (statsCollector != null)
-                        statsCollector.messageSent(messageBytes);
+                        statsCollector.messageSent(message);
                     break;
                 } catch (final InterruptedException ie) {
                     if (shutdown.get())
@@ -87,12 +87,12 @@ public class BlockingQueueSender implements Sender {
                 }
             }
         } else {
-            if (!queue.offer(messageBytes)) {
+            if (!queue.offer(message)) {
                 if (statsCollector != null)
                     statsCollector.messageNotSent();
                 throw new MessageTransportException("Failed to queue message due to capacity.");
             } else if (statsCollector != null)
-                statsCollector.messageSent(messageBytes);
+                statsCollector.messageSent(message);
         }
     }
 

@@ -37,8 +37,6 @@ import net.dempsy.lifecycle.annotation.Start;
 import net.dempsy.messages.Adaptor;
 import net.dempsy.messages.Dispatcher;
 import net.dempsy.messages.KeySource;
-import net.dempsy.serialization.Serializer;
-import net.dempsy.serialization.java.JavaSerializer;
 
 public class TestConfig {
 
@@ -110,7 +108,7 @@ public class TestConfig {
         // if we get to here without an error we should be okay
         node.validate(); // this throws if there's a problem.
 
-        assertNull(node.getSerializer());
+        assertNull(node.getReceiver());
         assertNotNull(cd.getRoutingStrategy());
         assertNull(node.getStatsCollector());
     }
@@ -123,7 +121,7 @@ public class TestConfig {
         // if we get to here without an error we should be okay
         node.validate(); // this throws if there's a problem.
 
-        assertNull(node.getSerializer());
+        assertNull(node.getReceiver());
         assertNotNull(cd.getRoutingStrategy());
         assertNull(node.getStatsCollector());
     }
@@ -132,10 +130,10 @@ public class TestConfig {
     public void testConfig() throws Throwable {
         final List<Cluster> clusterDefs = new ArrayList<Cluster>();
 
-        Serializer appSer;
+        Object appSer;
         Object appRs;
         Object appSc;
-        final Node node = new Node("test").serializer(appSer = new JavaSerializer())
+        final Node node = new Node("test").receiver(appSer = new Object())
                 .setStatsCollector(appSc = new Object()).setDefaultRoutingStrategy(appRs = new Object());
 
         Cluster cd = new Cluster("test-slot1").setAdaptor(new GoodAdaptor());
@@ -178,7 +176,7 @@ public class TestConfig {
         assertFalse(new ClusterId("test", "test-slot3").equals(new Object()));
         assertFalse(new ClusterId("test", "test-slot3").equals(null));
 
-        assertEquals(appSer, node.getSerializer());
+        assertEquals(appSer, node.getReceiver());
 
         assertEquals(appRs, node.getDefaultRoutingStrategy());
 
@@ -191,12 +189,12 @@ public class TestConfig {
     @Test
     public void testConfigBuilder() throws Throwable {
 
-        Serializer appSer;
+        Object appSer;
         final Object appRs;
         Object appScf;
         Object clusRs;
         final Node app = new Node("test")
-                .serializer(appSer = new JavaSerializer())
+                .receiver(appSer = new Object())
                 .defaultRoutingStrategy(appRs = new Object())
                 .statsCollector(appScf = new Object());
 
@@ -222,7 +220,7 @@ public class TestConfig {
         assertFalse(new ClusterId("test", "test-slot3").equals(new Object()));
         assertFalse(new ClusterId("test", "test-slot3").equals(null));
 
-        assertEquals(appSer, app.getSerializer());
+        assertEquals(appSer, app.getReceiver());
 
         assertEquals(appRs, app.getDefaultRoutingStrategy());
 

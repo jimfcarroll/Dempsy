@@ -14,43 +14,36 @@
    <bean id="inputQueue" class="java.util.concurrent.ArrayBlockingQueue">
       <constructor-arg value="16" />
    </bean>
+   
+   <bean id="junk" class="java.lang.Object" />
+   
+   <bean class="net.dempsy.config.Node" >
+     <constructor-arg value="test-app" />
+     <property name="statsCollector" ref="statsCollector" />
+     <property name="defaultRoutingStrategy" ref="junk" />
+     <property name="receiver" ref="inputTransport" />
+     <property name="clusters">
+        <list>
+          <bean class="net.dempsy.config.Cluster">
+            <constructor-arg value="test-cluster" />
+            <property name="messageProcessor" >
+              <bean class="net.dempsy.lifecycle.annotation.MessageProcessor" >
+                <constructor-arg ref="testMp" />
+              </bean>
+            </property>
+          </bean>
+        </list>
+     </property>
+   </bean>
 
-   <bean id="inputTransport"
-      class="net.dempsy.messagetransport.blockingqueue.BlockingQueueAdaptor" init-method="start" destroy-method="stop">
-      <property name="queue" ref="inputQueue" />
-      <property name="listener" ref="container" />
-      <property name="failFast" value="${failFast}" />
+   <bean id="inputTransport" class="net.dempsy.transport.blockingqueue.BlockingQueueReceiver">
+      <constructor-arg ref="inputQueue" />
    </bean>
 
    <!-- output: dispatcher sends messages to transport wrapping output queue -->
-   <bean id="outputQueue" class="java.util.concurrent.LinkedBlockingQueue">
-      <!--  <constructor-arg value="16"/> unbounded -->
-   </bean>
-
-   <bean id="distributor" class="net.dempsy.container.TestMpContainer$DummyDispatcher">
-      <property name="sender">
-         <bean id="outputTransport" class="net.dempsy.messagetransport.blockingqueue.BlockingQueueSender">
-            <constructor-arg ref="statsCollector" />
-            <property name="queue" ref="outputQueue" />
-         </bean>
-      </property>
-   </bean>
-
-   <!-- containers should be explicitly configured, not auto-wired; too much plumbing -->
-   <bean id="container" class="net.dempsy.container.Container">
-      <constructor-arg ref="testMP" />
-      <constructor-arg>
-        <bean class="net.dempsy.config.ClusterId">
-          <constructor-arg index="0" value="test" />
-          <constructor-arg index="1" value="test" />
-        </bean>
-      </constructor-arg>
-      <property name="prototype" ref="testMP" />
-      <property name="dispatcher" ref="distributor" />
-      <property name="statCollector" ref="statsCollector" />
-   </bean>
+   <bean id="outputQueue" class="java.util.concurrent.LinkedBlockingQueue" />
 
    <!-- in a real app, these would be inner beans; for testing, we want to access them -->
-   <bean id="testMP" class="net.dempsy.container.TestMpContainer$TestProcessor" />
+   <bean id="testMp" class="net.dempsy.container.TestContainer$TestProcessor" />
 
 </beans>

@@ -22,9 +22,9 @@ import net.dempsy.transport.NodeAddress;
 
 public class BlockingQueueAddress implements NodeAddress {
 
-    protected final BlockingQueue<byte[]> queue;
+    protected final BlockingQueue<Object> queue;
 
-    public BlockingQueueAddress(final BlockingQueue<byte[]> queue) {
+    public BlockingQueueAddress(final BlockingQueue<Object> queue) {
         this.queue = queue;
     }
 
@@ -36,5 +36,10 @@ public class BlockingQueueAddress implements NodeAddress {
     @Override
     public boolean equals(final Object other) {
         return (other == null || !(other instanceof BlockingQueueAddress)) ? false : queue.equals(((BlockingQueueAddress) other).queue);
+    }
+
+    @Override
+    public String toString() {
+        return queue.toString();
     }
 }

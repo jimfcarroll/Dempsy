@@ -42,6 +42,7 @@ import net.dempsy.DempsyException;
 import net.dempsy.config.ClusterId;
 import net.dempsy.messages.Dispatcher;
 import net.dempsy.messages.KeyedMessage;
+import net.dempsy.messages.KeyedMessageWithType;
 import net.dempsy.messages.MessageProcessorLifecycle;
 import net.dempsy.monitoring.StatsCollector;
 import net.dempsy.util.SafeString;
@@ -176,7 +177,7 @@ public class Container {
          * 
          * @param block
          *            - whether or not to wait for the lock.
-         * @return the instance if the lock was aquired. null otherwise.
+         * @return the instance if the lock was acquired. null otherwise.
          */
         public Object getExclusive(final boolean block) {
             if (block) {
@@ -242,7 +243,7 @@ public class Container {
     }
 
     // this is called directly from tests but shouldn't be accessed otherwise.
-    protected boolean dispatch(final KeyedMessage message, final boolean block) throws IllegalArgumentException {
+    public boolean dispatch(final KeyedMessage message, final boolean block) throws IllegalArgumentException, ContainerException {
         statCollector.messageReceived(message);
         if (message == null)
             return false; // No. We didn't process the null message
@@ -252,7 +253,14 @@ public class Container {
 
         do {
             evictedAndBlocking = false;
-            final InstanceWrapper wrapper = getInstanceForDispatch(message);
+
+            if (message == null || message.message == null)
+                throw new IllegalArgumentException("the container for " + clusterId + " attempted to dispatch null message.");
+
+            if (message.key == null)
+                throw new ContainerException("Message " + objectDescription(message.message) + " contains no key.");
+
+            final InstanceWrapper wrapper = getInstanceForKey(message.key);
 
             // wrapper will be null if the activate returns 'false'
             if (wrapper != null) {
@@ -302,39 +310,6 @@ public class Container {
         } while (evictedAndBlocking);
 
         return messageDispatchSuccessful;
-    }
-
-    /**
-     * Returns the instance associated with the given message, creating it if necessary. Will append the message to the instance's work queue (which may also contain an activation invocation).
-     * 
-     * This method can return null if the instance activation explicitly returns 'false' which tells the container NOT to incorporate the new instance.
-     */
-    protected InstanceWrapper getInstanceForDispatch(final KeyedMessage message) throws IllegalArgumentException {
-        if (message == null || message.message == null)
-            throw new IllegalArgumentException("the container for " + clusterId + " attempted to dispatch null message.");
-
-        if (message.key == null)
-            throw new ContainerException("Message " + objectDescription(message.message) + " contains no key.");
-
-        if (message.messageTypes == null || message.messageTypes.length == 0)
-            throw new ContainerException("Message " + objectDescription(message.message) + " has no associated MessageType.");
-
-        // make sure the message belongs here.
-        boolean acceptsMessageType = false;
-        for (final String mt : message.messageTypes) {
-            if (messageTypes.contains(mt)) {
-                acceptsMessageType = true;
-                break;
-            }
-        }
-
-        if (!acceptsMessageType)
-            throw new ContainerException("The message " + objectDescription(message.message) + " doesn't appear among \"" + messageTypes
-                    + "\" which are the message types handled by " + clusterId);
-
-        final Object key = message.key;
-        final InstanceWrapper wrapper = getInstanceForKey(key);
-        return wrapper;
     }
 
     public void evict() {
@@ -721,7 +696,7 @@ public class Container {
             try {
                 statCollector.messageDispatched(message);
                 @SuppressWarnings("unchecked")
-                final List<KeyedMessage> result = op == Operation.output ? prototype.invokeOutput(instance)
+                final List<KeyedMessageWithType> result = op == Operation.output ? prototype.invokeOutput(instance)
                         : prototype.invoke(instance, message);
                 statCollector.messageProcessed(message);
                 if (result != null) {

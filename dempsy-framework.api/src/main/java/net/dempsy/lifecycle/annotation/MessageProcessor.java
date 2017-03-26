@@ -37,6 +37,7 @@ import net.dempsy.config.Cluster;
 import net.dempsy.config.ClusterId;
 import net.dempsy.lifecycle.annotation.internal.AnnotatedMethodInvoker;
 import net.dempsy.lifecycle.annotation.utils.KeyExtractor;
+import net.dempsy.messages.KeyedMessageWithType;
 import net.dempsy.messages.KeyedMessage;
 import net.dempsy.messages.MessageProcessorLifecycle;
 import net.dempsy.util.SafeString;
@@ -117,7 +118,7 @@ public class MessageProcessor<T> implements MessageProcessorLifecycle<T> {
      * Invokes the appropriate message handler of the passed instance. Caller is responsible for not passing <code>null</code> messages.
      */
     @Override
-    public List<KeyedMessage> invoke(final T instance, final KeyedMessage message) throws IllegalArgumentException, DempsyException {
+    public List<KeyedMessageWithType> invoke(final T instance, final KeyedMessage message) throws IllegalArgumentException, DempsyException {
 
         if (!isMessageSupported(message.message))
             throw new IllegalArgumentException(mpClassName + ": no handler for messages of type: " + message.message.getClass().getName());
@@ -127,17 +128,17 @@ public class MessageProcessor<T> implements MessageProcessorLifecycle<T> {
 
     }
 
-    private static final List<KeyedMessage> emptyKeyMessageList = Collections.unmodifiableList(new ArrayList<KeyedMessage>());
+    private static final List<KeyedMessageWithType> emptyKeyMessageList = Collections.unmodifiableList(new ArrayList<KeyedMessageWithType>());
 
     /**
      * Invokes the output method, if it exists. If the instance does not have an annotated output method, this is a no-op (this is simpler than requiring the caller to check every instance).
      */
     @Override
-    public List<KeyedMessage> invokeOutput(final T instance) throws DempsyException {
+    public List<KeyedMessageWithType> invokeOutput(final T instance) throws DempsyException {
         if (outputMethods == null)
             return emptyKeyMessageList;
 
-        final List<KeyedMessage> ret = new ArrayList<>();
+        final List<KeyedMessageWithType> ret = new ArrayList<>();
         for (final Method om : outputMethods) {
             final Object or = wrap(() -> om.invoke(instance));
             if (or != null) {
@@ -368,7 +369,7 @@ public class MessageProcessor<T> implements MessageProcessorLifecycle<T> {
         }
     }
 
-    private List<KeyedMessage> convertToKeyedMessage(final Object toSend) {
+    private List<KeyedMessageWithType> convertToKeyedMessage(final Object toSend) {
         final Class<?> messageClass = toSend.getClass();
         try {
             if (!stopTryingToSendTheseTypes.contains(messageClass))

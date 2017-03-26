@@ -49,7 +49,7 @@ public class BlockingQueueReceiver implements Runnable, Receiver {
     private static final AtomicLong receiverNumber = new AtomicLong();
 
     private final BlockingQueueAddress address;
-    private final BlockingQueue<byte[]> queue;
+    private final BlockingQueue<Object> queue;
 
     private Listener listener = null;
 
@@ -73,7 +73,7 @@ public class BlockingQueueReceiver implements Runnable, Receiver {
      * @throws MessageTransportException
      *             if the BlockingQueue implementation isn't set or if the listener to send the messages to isn't set.
      */
-    public BlockingQueueReceiver(final BlockingQueue<byte[]> queue) {
+    public BlockingQueueReceiver(final BlockingQueue<Object> queue) {
         this.queue = queue;
         this.address = new BlockingQueueAddress(queue);
     }
@@ -94,7 +94,7 @@ public class BlockingQueueReceiver implements Runnable, Receiver {
         // This check is cheap but unlocked
         while (!shutdown) {
             try {
-                final byte[] val = queue.take();
+                final Object val = queue.take();
                 curListener.onMessage(val);
             } catch (final InterruptedException ie) {
                 synchronized (this) {

@@ -14,10 +14,11 @@
  * limitations under the License.
  */
 
-package net.dempsy.container;
+package net.dempsy.monitoring.basic;
 
 import java.util.concurrent.atomic.AtomicLong;
 
+import net.dempsy.container.MetricGetters;
 import net.dempsy.monitoring.StatsCollector;
 
 /**
@@ -147,7 +148,7 @@ public class BasicStatsCollector implements StatsCollector, MetricGetters {
     }
 
     @Override
-    public void messageSent(final byte[] message) {
+    public void messageSent(final Object message) {
         messagesSent.incrementAndGet();
     }
 

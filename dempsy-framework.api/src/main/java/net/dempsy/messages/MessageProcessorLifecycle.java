@@ -37,7 +37,7 @@ public interface MessageProcessorLifecycle<T> {
      * @throws IllegalAccessException
      * @throws IllegalArgumentException
      */
-    public List<KeyedMessage> invoke(T instance, KeyedMessage message) throws IllegalArgumentException, DempsyException;
+    public List<KeyedMessageWithType> invoke(T instance, KeyedMessage message) throws IllegalArgumentException, DempsyException;
 
     /**
      * Invokes the output method, if it exists. If the instance does not have an annotated output method,
@@ -47,7 +47,7 @@ public interface MessageProcessorLifecycle<T> {
      * @throws IllegalAccessException
      * @throws IllegalArgumentException
      */
-    public List<KeyedMessage> invokeOutput(T instance) throws DempsyException;
+    public List<KeyedMessageWithType> invokeOutput(T instance) throws DempsyException;
 
     public boolean isOutputSupported();
 

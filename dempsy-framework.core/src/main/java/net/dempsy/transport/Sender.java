@@ -24,11 +24,11 @@ public interface Sender extends AutoCloseable {
      * Sends the message. The implementor needs to take special handle exceptions from the underlying system correctly. The user of the <em>Sender</em> should not be required to release the sender and reaquire
      * it. The Sender should do that work.
      * 
-     * @param messageBytes
-     *            The serialized message to send
+     * @param message
+     *            The pre-serialized message to send
      * @throws MessageTransportException
      *             indicates that the message wasn't sent.
      */
-    public void send(byte[] messageBytes) throws MessageTransportException;
+    public void send(Object message) throws MessageTransportException;
 
 }

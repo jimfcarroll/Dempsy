@@ -19,13 +19,13 @@ import net.dempsy.lifecycle.annotations.TestMps.TestMp;
 import net.dempsy.lifecycle.annotations.TestMps.TestMpMessageTypeClass;
 import net.dempsy.lifecycle.annotations.TestMps.TestMpWithMultiLevelMessageTypeParameter;
 import net.dempsy.lifecycle.annotations.TestMps.TestMpWithReturn;
-import net.dempsy.messages.KeyedMessage;
+import net.dempsy.messages.KeyedMessageWithType;
 
 public class MessageProcessMessageHandlingTest {
     @Rule
     public ExpectedException exception = ExpectedException.none();
 
-    private static KeyedMessage km(final Object message) throws IllegalAccessException, IllegalArgumentException, InvocationTargetException {
+    private static KeyedMessageWithType km(final Object message) throws IllegalAccessException, IllegalArgumentException, InvocationTargetException {
         return new KeyExtractor().extract(message).get(0);
     }
 
@@ -56,7 +56,7 @@ public class MessageProcessMessageHandlingTest {
 
         final Message m = new Message("yo");
         final TestMpWithReturn instance = helper.newInstance();
-        final List<KeyedMessage> kms = helper.invoke(instance, km(m));
+        final List<KeyedMessageWithType> kms = helper.invoke(instance, km(m));
         assertEquals(1, kms.size());
         assertNotNull(kms.get(0).messageTypes);
         assertEquals(5, kms.get(0).messageTypes.length);

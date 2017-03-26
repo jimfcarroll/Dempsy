@@ -52,7 +52,7 @@ public interface StatsCollector extends AutoCloseable {
     /**
      * Dispatcher calls this method when emitting a message
      */
-    void messageSent(byte[] message);
+    void messageSent(Object message);
 
     /**
      * Dispatcher calls this method when it fails to dispatch a message

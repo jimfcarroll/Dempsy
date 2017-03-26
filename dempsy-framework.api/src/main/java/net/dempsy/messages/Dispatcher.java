@@ -38,7 +38,7 @@ public abstract class Dispatcher {
     * a {@link Mp} somewhere in the Dempsy application that the
     * {@link Adaptor} is part of.
     */
-    public abstract void dispatch(KeyedMessage message);
+    public abstract void dispatch(KeyedMessageWithType message);
 
     public void dispatchAnnotated(final Object message) throws IllegalAccessException, IllegalArgumentException, InvocationTargetException {
         if (message == null)
@@ -47,7 +47,7 @@ public abstract class Dispatcher {
         dispatch(extractor.extract(message));
     }
 
-    public void dispatch(final List<KeyedMessage> messages) {
+    public void dispatch(final List<KeyedMessageWithType> messages) {
         if (messages != null)
             messages.forEach(v -> dispatch(v));
     }

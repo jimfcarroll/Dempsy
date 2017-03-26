@@ -12,7 +12,7 @@ import java.util.Map;
 import net.dempsy.lifecycle.annotation.MessageKey;
 import net.dempsy.lifecycle.annotation.internal.AnnotatedMethodInvoker;
 import net.dempsy.lifecycle.annotation.internal.MessageTypeExtractorFromMessages;
-import net.dempsy.messages.KeyedMessage;
+import net.dempsy.messages.KeyedMessageWithType;
 
 public class KeyExtractor {
 
@@ -28,11 +28,11 @@ public class KeyExtractor {
 
     private final Map<Class<?>, MteAndGetter> cache = new HashMap<Class<?>, MteAndGetter>();
 
-    public List<KeyedMessage> extract(final Object toSend) throws IllegalAccessException, IllegalArgumentException, InvocationTargetException {
+    public List<KeyedMessageWithType> extract(final Object toSend) throws IllegalAccessException, IllegalArgumentException, InvocationTargetException {
         final List<Object> messages = new ArrayList<Object>();
         unwindMessages(toSend, messages);
 
-        final ArrayList<KeyedMessage> ret = new ArrayList<>(messages.size());
+        final ArrayList<KeyedMessageWithType> ret = new ArrayList<>(messages.size());
 
         for (final Object msg : messages) {
             final Class<?> messageClass = msg.getClass();
@@ -49,7 +49,7 @@ public class KeyExtractor {
                                 + MessageKey.class.getSimpleName() + " so there's no way to route this message");
             final Object msgKeyValue = extractor.getter.invoke(toSend);
 
-            ret.add(new KeyedMessage(msgKeyValue, toSend, extractor.mtExtractor.get(toSend)));
+            ret.add(new KeyedMessageWithType(msgKeyValue, toSend, extractor.mtExtractor.get(toSend)));
         }
 
         return ret;

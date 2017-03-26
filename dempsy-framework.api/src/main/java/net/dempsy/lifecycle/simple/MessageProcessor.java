@@ -7,6 +7,7 @@ import java.util.Set;
 import java.util.function.Supplier;
 
 import net.dempsy.config.ClusterId;
+import net.dempsy.messages.KeyedMessageWithType;
 import net.dempsy.messages.KeyedMessage;
 import net.dempsy.messages.MessageProcessorLifecycle;
 
@@ -49,12 +50,12 @@ public class MessageProcessor implements MessageProcessorLifecycle<Mp> {
     }
 
     @Override
-    public List<KeyedMessage> invoke(final Mp instance, final KeyedMessage message) throws IllegalArgumentException {
+    public List<KeyedMessageWithType> invoke(final Mp instance, final KeyedMessage message) throws IllegalArgumentException {
         return Arrays.asList(instance.handle(message));
     }
 
     @Override
-    public List<KeyedMessage> invokeOutput(final Mp instance) throws IllegalArgumentException {
+    public List<KeyedMessageWithType> invokeOutput(final Mp instance) throws IllegalArgumentException {
         return Arrays.asList(instance.output());
     }
 
