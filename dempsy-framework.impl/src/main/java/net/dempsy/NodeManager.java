@@ -5,9 +5,9 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -20,6 +20,7 @@ import net.dempsy.config.Node;
 import net.dempsy.container.Container;
 import net.dempsy.messages.Adaptor;
 import net.dempsy.router.RoutingStrategy;
+import net.dempsy.router.RoutingStrategy.ContainerAddress;
 import net.dempsy.router.RoutingStrategy.Inbound;
 import net.dempsy.transport.NodeAddress;
 import net.dempsy.transport.Receiver;
@@ -76,7 +77,7 @@ public class NodeManager implements Infrastructure {
 
                 // TODO: This is a hack for now.
                 final Manager<RoutingStrategy.Inbound> inboundManager = new Manager<RoutingStrategy.Inbound>(RoutingStrategy.Inbound.class);
-                final RoutingStrategy.Inbound is = inboundManager.getAssociatedSenderFactory(c.getRoutingStrategyId());
+                final RoutingStrategy.Inbound is = inboundManager.getAssociatedInstance(c.getRoutingStrategyId());
                 containers.add(new PerContainer(con, is));
             }
         });
@@ -89,17 +90,19 @@ public class NodeManager implements Infrastructure {
         final Receiver receiver = (Receiver) node.getReceiver();
         final NodeAddress nodeAddress = receiver.getAddress();
         final String nodeId = nodeAddress.getGuid();
-        final Map<ClusterId, Set<String>> messageTypesByClusterId = new HashMap<>();
-        node.getClusters().forEach(c -> messageTypesByClusterId.put(c.getClusterId(), c.getMessageProcessor().messagesTypesHandled()));
+        final Map<ClusterId, ClusterInformation> messageTypesByClusterId = new HashMap<>();
+        node.getClusters().forEach(c -> messageTypesByClusterId.put(c.getClusterId(),
+                new ClusterInformation(c.getRoutingStrategyId(), c.getClusterId(), c.getMessageProcessor().messagesTypesHandled())));
         final NodeInformation nodeInfo = new NodeInformation(receiver.transportTypeId(), nodeAddress, messageTypesByClusterId);
 
-        // Then actually register
+        // Then actually register the Node
         keepNodeRegstered = new PersistentTask(LOGGER, isRunning, persistenceScheduler, RETRY_PERIOND_MILLIS) {
             @Override
             public boolean execute() {
                 try {
                     final String application = node.application;
-                    makeRootDirsForApplication(session, application);
+                    session.recursiveMkdir(clusters(application), DirMode.PERSISTENT);
+                    session.recursiveMkdir(nodes(application), DirMode.PERSISTENT);
 
                     final String nodePath = nodes(application) + "/" + nodeId;
 
@@ -124,6 +127,13 @@ public class NodeManager implements Infrastructure {
 
         isRunning.set(true);
         keepNodeRegstered.process();
+
+        // Also start the inbound side routing strategies
+        IntStream.range(0, containers.size()).forEach(i -> {
+            final PerContainer c = containers.get(i);
+            c.inboundStrategy.setContainerDetails(c.container.getClusterId(), new ContainerAddress(nodeAddress, i));
+            c.inboundStrategy.start(this);
+        });
         // =====================================
 
         return this;
@@ -189,12 +199,6 @@ public class NodeManager implements Infrastructure {
 
     private static String cluster(final ClusterId clusterId) {
         return clusters(clusterId.applicationName) + "/" + clusterId.clusterName;
-    }
-
-    private static void makeRootDirsForApplication(final ClusterInfoSession session, final String application) throws ClusterInfoException {
-        session.mkdir(root(application), null, DirMode.PERSISTENT);
-        session.mkdir(nodes(application), null, DirMode.PERSISTENT);
-        session.mkdir(clusters(application), null, DirMode.PERSISTENT);
     }
 
 }

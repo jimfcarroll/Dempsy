@@ -55,8 +55,13 @@ public abstract class PersistentTask implements ClusterInfoWatcher {
     }
 
     private synchronized void executeUntilWorks() {
-        if (!isRunning.get())
+        if (!isRunning.get()) {
+            if (currentlyWaitingOn != null) {
+                currentlyWaitingOn.cancel();
+                currentlyWaitingOn = null;
+            }
             return;
+        }
 
         // we need to flatten out recursions. This may be called from
         // the same thread but deeper in the call tree. Therefore, if

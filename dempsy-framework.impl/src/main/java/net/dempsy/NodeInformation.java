@@ -3,7 +3,6 @@ package net.dempsy;
 import java.io.Serializable;
 import java.util.Collections;
 import java.util.Map;
-import java.util.Set;
 
 import net.dempsy.config.ClusterId;
 import net.dempsy.transport.NodeAddress;
@@ -12,10 +11,10 @@ public class NodeInformation implements Serializable {
     private static final long serialVersionUID = 1L;
     public final String transportTypeId;
     public final NodeAddress nodeAddress;
-    public final Map<ClusterId, Set<String>> clusterInfoByClusterId;
+    public final Map<ClusterId, ClusterInformation> clusterInfoByClusterId;
 
     public NodeInformation(final String transportTypeId, final NodeAddress nodeAddress,
-            final Map<ClusterId, Set<String>> messageTypesByClusterId) {
+            final Map<ClusterId, ClusterInformation> messageTypesByClusterId) {
         this.transportTypeId = transportTypeId;
         this.nodeAddress = nodeAddress;
         this.clusterInfoByClusterId = Collections.unmodifiableMap(messageTypesByClusterId);

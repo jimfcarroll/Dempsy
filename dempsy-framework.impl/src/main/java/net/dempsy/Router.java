@@ -1,12 +1,14 @@
 package net.dempsy;
 
 import java.io.Serializable;
+import java.util.Collection;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import net.dempsy.cluster.ClusterInfoException;
 import net.dempsy.cluster.ClusterInfoSession;
 import net.dempsy.config.ClusterId;
 import net.dempsy.messages.Dispatcher;
@@ -18,15 +20,11 @@ public class Router extends Dispatcher implements Service {
     private static Logger LOGGER = LoggerFactory.getLogger(Router.class);
     private static final long RETRY_TIMEOUT = 500L;
 
-    ClusterInfoSession session;
+    private ClusterInfoSession session;
 
-    private final ConcurrentHashMap<ClusterId, RoutingStrategy> routStragByCid = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<ClusterId, RoutingStrategy.Outbound> routStragByCid = new ConcurrentHashMap<>();
     private PersistentTask checkup;
     private final AtomicBoolean isRunning = new AtomicBoolean(false);
-
-    public Router(final ClusterInfoSession session) {
-        this.session = session;
-    }
 
     @Override
     public void dispatch(final KeyedMessageWithType message) {
@@ -49,12 +47,24 @@ public class Router extends Dispatcher implements Service {
 
     @Override
     public void start(final Infrastructure infra) {
+        session = infra.getCollaborator();
+        final String clustersDir = infra.getRootPaths().clustersDir;
+
         checkup = new PersistentTask(LOGGER, isRunning, infra.getScheduler(), RETRY_TIMEOUT) {
-            private final ClusterInfoSession session = infra.getCollaborator();
 
             @Override
             public boolean execute() {
 
+                try {
+                    final Collection<String> clusters = session.getSubdirs(clustersDir, this);
+
+                } catch (final ClusterInfoException e) {
+                    final String message = "Failed to find outgoing route information. Will retry shortly.";
+                    if (LOGGER.isTraceEnabled())
+                        LOGGER.debug(message, e);
+                    else LOGGER.debug(message);
+                    return false;
+                }
                 return false;
             }
         };

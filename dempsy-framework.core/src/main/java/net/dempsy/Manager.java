@@ -18,7 +18,7 @@ public class Manager<T> {
         this.clazz = clazz;
     }
 
-    public T getAssociatedSenderFactory(final String typeId) throws DempsyException {
+    public T getAssociatedInstance(final String typeId) throws DempsyException {
         LOGGER.trace("Trying to find SenderFactory associated with the transport \"{}\"", typeId);
 
         T ret = null;
@@ -27,10 +27,10 @@ public class Manager<T> {
             ret = registered.get(typeId);
             if (ret == null) {
                 LOGGER.trace(clazz.getSimpleName()
-                        + " associated with the transport \"%s\" wasn't already registered. Attempting to create one assuming the transport id is a package name",
+                        + " associated with the transport \"{}\" wasn't already registered. Attempting to create one assuming the transport id is a package name",
                         typeId);
                 // try something stupid like assume it's a package name and the sender factory is in that package
-                final Reflections reflections = new Reflections("my.package");
+                final Reflections reflections = new Reflections(typeId);
 
                 final Set<Class<? extends T>> senderFactoryClasses = reflections.getSubTypesOf(clazz);
 
