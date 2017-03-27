@@ -51,4 +51,10 @@ public class ClusterInformation {
             return false;
         return true;
     }
+
+    @Override
+    public String toString() {
+        return "ClusterInformation [messageTypesHandled=" + messageTypesHandled + ", routingStrategyTypeId=" + routingStrategyTypeId + ", clusterId="
+                + clusterId + "]";
+    }
 }

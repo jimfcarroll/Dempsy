@@ -17,28 +17,38 @@
 package net.dempsy.router;
 
 import java.io.Serializable;
+import java.util.Arrays;
 
 import net.dempsy.Service;
-import net.dempsy.cluster.ClusterInfoSession;
 import net.dempsy.config.ClusterId;
 import net.dempsy.messages.KeyedMessageWithType;
 import net.dempsy.transport.NodeAddress;
 
 public interface RoutingStrategy {
 
-    public static void makeRootClusterDirectory(final ClusterInfoSession session, final ClusterId clusterId) {
-
-    }
-
     public static class ContainerAddress implements Serializable {
         private static final long serialVersionUID = 1L;
         public final NodeAddress node;
-        public final int cluster;
+        public final int[] clusters;
 
         public ContainerAddress(final NodeAddress node, final int cluster) {
             this.node = node;
-            this.cluster = cluster;
+            this.clusters = new int[] { cluster };
         }
+
+        public ContainerAddress(final NodeAddress node, final int[] clusters) {
+            this.node = node;
+            this.clusters = clusters;
+        }
+
+        @Override
+        public String toString() {
+            return "ContainerAddress [node=" + node + ", clusters=" + Arrays.toString(clusters) + "]";
+        }
+    }
+
+    public static interface Factory extends Service {
+        public Outbound getStrategy(ClusterId clusterId);
     }
 
     public static interface Outbound extends Service {

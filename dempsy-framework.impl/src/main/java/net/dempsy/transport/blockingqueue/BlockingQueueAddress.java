@@ -23,9 +23,11 @@ import net.dempsy.transport.NodeAddress;
 public class BlockingQueueAddress implements NodeAddress {
 
     protected final BlockingQueue<Object> queue;
+    protected final String guid;
 
-    public BlockingQueueAddress(final BlockingQueue<Object> queue) {
+    public BlockingQueueAddress(final BlockingQueue<Object> queue, final String guid) {
         this.queue = queue;
+        this.guid = guid;
     }
 
     @Override
@@ -40,6 +42,11 @@ public class BlockingQueueAddress implements NodeAddress {
 
     @Override
     public String toString() {
-        return queue.toString();
+        return guid;
+    }
+
+    @Override
+    public String getGuid() {
+        return guid;
     }
 }

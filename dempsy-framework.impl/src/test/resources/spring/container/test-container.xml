@@ -15,12 +15,10 @@
       <constructor-arg value="16" />
    </bean>
    
-   <bean id="junk" class="java.lang.Object" />
-   
    <bean class="net.dempsy.config.Node" >
      <constructor-arg value="test-app" />
      <property name="statsCollector" ref="statsCollector" />
-     <property name="defaultRoutingStrategy" ref="junk" />
+     <property name="defaultRoutingStrategyId" value="net.dempsy.router.simple" />
      <property name="receiver" ref="inputTransport" />
      <property name="clusters">
         <list>
@@ -32,6 +30,10 @@
               </bean>
             </property>
           </bean>
+          <bean class="net.dempsy.config.Cluster">
+            <constructor-arg value="test-adaptor" />
+            <property name="adaptor" ref="adaptor" />
+          </bean>
         </list>
      </property>
    </bean>
@@ -40,10 +42,9 @@
       <constructor-arg ref="inputQueue" />
    </bean>
 
-   <!-- output: dispatcher sends messages to transport wrapping output queue -->
-   <bean id="outputQueue" class="java.util.concurrent.LinkedBlockingQueue" />
-
    <!-- in a real app, these would be inner beans; for testing, we want to access them -->
    <bean id="testMp" class="net.dempsy.container.TestContainer$TestProcessor" />
-
+   
+   <bean id="adaptor" class="net.dempsy.container.TestContainer$TestAdaptor" />
+   
 </beans>

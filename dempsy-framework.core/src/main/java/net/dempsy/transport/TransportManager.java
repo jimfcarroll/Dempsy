@@ -1,8 +1,8 @@
 package net.dempsy.transport;
 
-import net.dempsy.Manager;
+import net.dempsy.ServiceManager;
 
-public class TransportManager extends Manager<SenderFactory> {
+public class TransportManager extends ServiceManager<SenderFactory> {
     public TransportManager() {
         super(SenderFactory.class);
     }

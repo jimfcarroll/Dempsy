@@ -45,8 +45,9 @@ public class DefaultThreadingModel implements ThreadingModel {
      * Where 'm' is set by setCoresFactor and 'b' is set by setAdditionalThreads
      * </p>
      */
-    public void setCoresFactor(final double m) {
+    public DefaultThreadingModel setCoresFactor(final double m) {
         this.m = m;
+        return this;
     }
 
     /**
@@ -62,12 +63,13 @@ public class DefaultThreadingModel implements ThreadingModel {
      * Where 'm' is set by setCoresFactor and 'b' is set by setAdditionalThreads
      * </p>
      */
-    public void setAdditionalThreads(final int additionalThreads) {
+    public DefaultThreadingModel setAdditionalThreads(final int additionalThreads) {
         this.additionalThreads = additionalThreads;
+        return this;
     }
 
     @Override
-    public void start() {
+    public DefaultThreadingModel start() {
         if (threadPoolSize == -1) {
             // figure out the number of cores.
             final int cores = Runtime.getRuntime().availableProcessors();
@@ -81,14 +83,17 @@ public class DefaultThreadingModel implements ThreadingModel {
 
         if (maxNumWaitingLimitedTasks < 0)
             maxNumWaitingLimitedTasks = 20 * threadPoolSize;
+
+        return this;
     }
 
     public int getMaxNumberOfQueuedLimitedTasks() {
         return (int) maxNumWaitingLimitedTasks;
     }
 
-    public void setMaxNumberOfQueuedLimitedTasks(final int maxNumWaitingLimitedTasks) {
+    public DefaultThreadingModel setMaxNumberOfQueuedLimitedTasks(final int maxNumWaitingLimitedTasks) {
         this.maxNumWaitingLimitedTasks = maxNumWaitingLimitedTasks;
+        return this;
     }
 
     @Override

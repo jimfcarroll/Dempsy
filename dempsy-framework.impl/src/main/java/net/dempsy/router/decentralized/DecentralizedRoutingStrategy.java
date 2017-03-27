@@ -14,13 +14,15 @@
  * limitations under the License.
  */
 
-package net.dempsy.router;
+package net.dempsy.router.decentralized;
 
 import javax.annotation.PostConstruct;
 
 import net.dempsy.Infrastructure;
 import net.dempsy.cluster.ClusterInfoSession;
 import net.dempsy.messages.KeyedMessageWithType;
+import net.dempsy.router.RoutingStrategy;
+import net.dempsy.router.RoutingStrategy.ContainerAddress;
 
 /**
  * This Routing Strategy uses the MpCluster to negotiate with other instances in the cluster.

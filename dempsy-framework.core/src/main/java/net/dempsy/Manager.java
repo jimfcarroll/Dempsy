@@ -11,15 +11,16 @@ import org.slf4j.LoggerFactory;
 public class Manager<T> {
     private static Logger LOGGER = LoggerFactory.getLogger(Manager.class);
 
-    private final Map<String, T> registered = new HashMap<>();
-    private final Class<T> clazz;
+    protected final Map<String, T> registered = new HashMap<>();
+    protected final Class<T> clazz;
 
     public Manager(final Class<T> clazz) {
         this.clazz = clazz;
     }
 
     public T getAssociatedInstance(final String typeId) throws DempsyException {
-        LOGGER.trace("Trying to find SenderFactory associated with the transport \"{}\"", typeId);
+        if (LOGGER.isTraceEnabled())
+            LOGGER.trace("Trying to find " + clazz.getSimpleName() + " associated with the transport \"{}\"", typeId);
 
         T ret = null;
 
@@ -27,7 +28,7 @@ public class Manager<T> {
             ret = registered.get(typeId);
             if (ret == null) {
                 LOGGER.trace(clazz.getSimpleName()
-                        + " associated with the transport \"{}\" wasn't already registered. Attempting to create one assuming the transport id is a package name",
+                        + " associated with the id \"{}\" wasn't already registered. Attempting to create one assuming the id is a package name",
                         typeId);
                 // try something stupid like assume it's a package name and the sender factory is in that package
                 final Reflections reflections = new Reflections(typeId);
@@ -37,7 +38,7 @@ public class Manager<T> {
                 if (senderFactoryClasses != null && senderFactoryClasses.size() > 0) {
                     final Class<? extends T> sfClass = senderFactoryClasses.iterator().next();
                     if (senderFactoryClasses.size() > 1)
-                        LOGGER.warn("Multiple SenderFactory implementations in the package \"{}\". Going with {}", typeId,
+                        LOGGER.warn("Multiple " + clazz.getSimpleName() + " implementations in the package \"{}\". Going with {}", typeId,
                                 sfClass.getName());
 
                     try {
@@ -46,7 +47,8 @@ public class Manager<T> {
                         registered.put(typeId, ret);
                     } catch (final InstantiationException | IllegalAccessException e) {
                         throw new DempsyException(
-                                "Failed to create an instance of the SenderFactory \"" + sfClass.getName() + "\". Is there a default constructor?",
+                                "Failed to create an instance of the " + clazz.getSimpleName() + " \"" + sfClass.getName()
+                                        + "\". Is there a default constructor?",
                                 e);
                     }
                 }
@@ -54,7 +56,7 @@ public class Manager<T> {
         }
 
         if (ret == null)
-            throw new DempsyException("Couldn't find a SenderFactory registered with transport type id \"" + typeId
+            throw new DempsyException("Couldn't find a " + clazz.getSimpleName() + " registered with transport type id \"" + typeId
                     + "\" and couldn't find an implementing class assuming the transport type id is a package name");
 
         return ret;

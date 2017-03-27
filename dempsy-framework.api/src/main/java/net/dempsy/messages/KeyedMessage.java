@@ -8,5 +8,4 @@ public class KeyedMessage {
         this.key = key;
         this.message = message;
     }
-
 }

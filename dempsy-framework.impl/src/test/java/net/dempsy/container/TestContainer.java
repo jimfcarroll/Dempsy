@@ -16,24 +16,24 @@
 
 package net.dempsy.container;
 
+import static net.dempsy.util.Functional.recheck;
+import static net.dempsy.util.Functional.uncheck;
+import static net.dempsy.utils.test.ConditionPoll.poll;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 import java.util.ArrayList;
-import java.util.Arrays;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Set;
-import java.util.concurrent.BlockingQueue;
+import java.util.Map;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.After;
 import org.junit.Before;
@@ -44,18 +44,22 @@ import net.dempsy.NodeManager;
 import net.dempsy.cluster.local.LocalClusterSessionFactory;
 import net.dempsy.config.ClusterId;
 import net.dempsy.config.Node;
-import net.dempsy.container.TestContainer.TestProcessor;
 import net.dempsy.container.mocks.ContainerTestMessage;
 import net.dempsy.container.mocks.OutputMessage;
 import net.dempsy.lifecycle.annotation.Activation;
 import net.dempsy.lifecycle.annotation.Evictable;
 import net.dempsy.lifecycle.annotation.MessageHandler;
+import net.dempsy.lifecycle.annotation.MessageKey;
+import net.dempsy.lifecycle.annotation.MessageProcessor;
+import net.dempsy.lifecycle.annotation.MessageType;
 import net.dempsy.lifecycle.annotation.Mp;
 import net.dempsy.lifecycle.annotation.Output;
 import net.dempsy.lifecycle.annotation.Passivation;
 import net.dempsy.lifecycle.annotation.Start;
-import net.dempsy.messages.KeySource;
-import net.dempsy.router.RoutingStrategy;
+import net.dempsy.lifecycle.annotation.utils.KeyExtractor;
+import net.dempsy.messages.Adaptor;
+import net.dempsy.messages.Dispatcher;
+import net.dempsy.transport.blockingqueue.BlockingQueueReceiver;
 
 //
 // NOTE: this test simply puts messages on an input queue, and expects
@@ -68,64 +72,104 @@ public class TestContainer {
     // ----------------------------------------------------------------------------
 
     private Container container = null;
-    private BlockingQueue<Object> inputQueue;
-    private BlockingQueue<Object> outputQueue;
 
     private ClassPathXmlApplicationContext context;
     private NodeManager manager;
-    private final long baseTimeoutMillis = 20000;
+    private LocalClusterSessionFactory sessionFactory;
 
-    // public static class DummyDispatcher extends Dispatcher {
-    // public Object lastDispatched;
-    //
-    // public Sender sender;
-    //
-    // @Override
-    // public void dispatch(final KeyedMessage message) {
-    // this.lastDispatched = message == null ? null : message.message;
-    // try {
-    // sender.send(message);
-    // } catch (final Exception e) {
-    // System.out.println("FAILED!");
-    // e.printStackTrace();
-    // throw new RuntimeException(e);
-    // }
-    // }
-    //
-    // public void setSender(final Sender sender) {
-    // this.sender = sender;
-    // }
-    // }
+    private final List<AutoCloseable> toClose = new ArrayList<>();
 
-    @Before
-    public void setUp() throws Throwable {
-        setUp("true");
+    private <T extends AutoCloseable> T track(final T o) {
+        toClose.add(o);
+        return o;
     }
 
-    @SuppressWarnings("unchecked")
-    public void setUp(final String failFast) throws Exception {
-        System.setProperty("failFast", failFast);
-        context = new ClassPathXmlApplicationContext("classpath:/spring/container/test-container.xml");
-        inputQueue = (BlockingQueue<Object>) context.getBean("inputQueue");
-        outputQueue = (BlockingQueue<Object>) context.getBean("outputQueue");
-
-        final LocalClusterSessionFactory sesf = new LocalClusterSessionFactory();
-        manager = new NodeManager().node(context.getBean(Node.class)).collaborator(sesf.createSession()).start();
+    @Before
+    public void setUp() throws Exception {
+        context = track(new ClassPathXmlApplicationContext("classpath:/spring/container/test-container.xml"));
+        sessionFactory = new LocalClusterSessionFactory();
+        manager = track(new NodeManager()).node(context.getBean(Node.class)).collaborator(track(sessionFactory.createSession())).start();
         container = manager.getContainers().get(0);
     }
 
     @After
     public void tearDown() throws Exception {
-        context.close();
-        context.destroy();
         context = null;
-        inputQueue = null;
-        outputQueue = null;
+        cache = null;
+        recheck(() -> toClose.forEach(v -> uncheck(() -> v.close())), Exception.class);
+        LocalClusterSessionFactory.completeReset();
+        sessionFactory = null;
+        outputMessages = null;
+    }
+
+    @MessageType
+    public static class MyMessage {
+
+        @Override
+        public String toString() {
+            return "MyMessage [value=" + value + "]";
+        }
+
+        public String value;
+
+        public MyMessage(final String value) {
+            this.value = value;
+        }
+
+        @MessageKey
+        public String getKey() {
+            return value;
+        }
+    }
+
+    public NodeManager addOutputCatchStage() throws InterruptedException {
+        // =======================================================
+        // configure an output catcher tier
+        final Node out = new Node("test-app").defaultRoutingStrategyId("net.dempsy.router.simple")
+                .receiver(new BlockingQueueReceiver(new ArrayBlockingQueue<>(16))); // same app as the spring file.
+        out.cluster("output-catch").mp(new MessageProcessor<OutputCatcher>(new OutputCatcher()));
+        out.validate();
+
+        final NodeManager nman = track(new NodeManager()).node(out).collaborator(track(sessionFactory.createSession())).start();
+        // wait until we can actually reach the output-catch cluster from the main node
+        assertTrue(poll(o -> {
+            try {
+                return manager.getRouter().canReach("output-catch", new KeyExtractor().extract(new OutputMessage("foo", 1, 1)).iterator().next());
+            } catch (final Exception e) {
+                return false;
+            }
+        }));
+        // =======================================================
+        return nman;
+    }
+
+    private TestProcessor createAndGet(final String foo) throws Exception {
+        cache = new HashMap<>();
+        final TestAdaptor adaptor = context.getBean(TestAdaptor.class);
+        assertNotNull(adaptor.dispatcher);
+
+        adaptor.dispatcher.dispatchAnnotated(new ContainerTestMessage(foo));
+
+        assertTrue(poll(o -> container.getProcessorCount() > 0));
+        Thread.sleep(100);
+        assertEquals("did not create MP", 1, container.getProcessorCount());
+
+        assertTrue(poll(cache, c -> c.get(foo) != null));
+        final TestProcessor mp = cache.get(foo);
+
+        assertNotNull("MP not associated with expected key", mp);
+        assertEquals("activation count, 1st message", 1, mp.activationCount);
+        assertEquals("invocation count, 1st message", 1, mp.invocationCount);
+
+        return mp;
     }
 
     // ----------------------------------------------------------------------------
     // Message and MP classes
     // ----------------------------------------------------------------------------
+
+    public static Map<String, TestProcessor> cache = null;
+    public static List<OutputMessage> outputMessages = null;
 
     @Mp
     public static class TestProcessor implements Cloneable {
@@ -178,14 +222,28 @@ public class TestContainer {
         }
 
         @MessageHandler
-        public ContainerTestMessage handle(final ContainerTestMessage message) throws InterruptedException {
+        public void handle(final ContainerTestMessage message) throws InterruptedException {
             myKey = message.getKey();
+
+            if (cache != null)
+                cache.put(myKey, this);
+
             invocationCount++;
 
             latch.await();
+        }
 
-            // put it on output queue so that we can synchronize test
-            return message;
+        @MessageHandler
+        public ContainerTestMessage handle(final MyMessage message) throws InterruptedException {
+            myKey = message.getKey();
+
+            if (cache != null)
+                cache.put(myKey, this);
+
+            invocationCount++;
+
+            latch.await();
+            return new ContainerTestMessage(message.value);
         }
 
         @Evictable
@@ -205,6 +263,36 @@ public class TestContainer {
         }
     }
 
+    @Mp
+    public static class OutputCatcher implements Cloneable {
+        @MessageHandler
+        public ContainerTestMessage handle(final OutputMessage message) throws InterruptedException {
+            if (outputMessages != null)
+                outputMessages.add(message);
+            return new ContainerTestMessage(message.mpKey);
+        }
+
+        @Override
+        public OutputCatcher clone() throws CloneNotSupportedException {
+            return (OutputCatcher) super.clone();
+        }
+    }
+
+    public static class TestAdaptor implements Adaptor {
+        public Dispatcher dispatcher;
+
+        @Override
+        public void setDispatcher(final Dispatcher dispatcher) {
+            this.dispatcher = dispatcher;
+        }
+
+        @Override
+        public void start() {}
+
+        @Override
+        public void stop() {}
+    }
+
     // ----------------------------------------------------------------------------
     // Test Cases
     // ----------------------------------------------------------------------------
@@ -222,164 +310,180 @@ public class TestContainer {
     }
 
     @Test
-    public void testMessageDispatch() throws Exception {
-        inputQueue.add(new ContainerTestMessage("foo"));
-        outputQueue.poll(1000, TimeUnit.MILLISECONDS);
+    public void testFeedbackLoop() throws Exception {
+        cache = new HashMap<>();
+        final TestAdaptor adaptor = context.getBean(TestAdaptor.class);
+        assertNotNull(adaptor.dispatcher);
 
+        adaptor.dispatcher.dispatchAnnotated(new MyMessage("foo"));
+
+        assertTrue(poll(o -> container.getProcessorCount() > 0));
+        Thread.sleep(100);
         assertEquals("did not create MP", 1, container.getProcessorCount());
 
-        // final TestProcessor mp = (TestProcessor) container.getMessageProcessor("foo");
-        // assertNotNull("MP not associated with expected key", mp);
-        // assertEquals("activation count, 1st message", 1, mp.activationCount);
-        // assertEquals("invocation count, 1st message", 1, mp.invocationCount);
-        //
-        // inputQueue.add(serializer.serialize(new ContainerTestMessage("foo")));
-        // outputQueue.poll(1000, TimeUnit.MILLISECONDS);
-        //
-        // assertEquals("activation count, 2nd message", 1, mp.activationCount);
-        // assertEquals("invocation count, 2nd message", 2, mp.invocationCount);
+        assertTrue(poll(cache, c -> c.get("foo") != null));
+        final TestProcessor mp = cache.get("foo");
+        assertNotNull("MP not associated with expected key", mp);
+
+        assertTrue(poll(mp, o -> o.invocationCount > 1));
+        assertEquals("activation count, 1st message", 1, mp.activationCount);
+        assertEquals("invocation count, 1st message", 2, mp.invocationCount);
+
+        adaptor.dispatcher.dispatchAnnotated(new ContainerTestMessage("foo"));
+        assertTrue(poll(mp, o -> o.invocationCount > 2));
+        Thread.sleep(100);
+
+        assertEquals("activation count, 2nd message", 1, mp.activationCount);
+        assertEquals("invocation count, 2nd message", 3, mp.invocationCount);
     }
 
     @Test
-    public void testInvokeOutput()
-            throws Exception {
-        inputQueue.add(serializer.serialize(new ContainerTestMessage("foo")));
-        outputQueue.poll(1000, TimeUnit.MILLISECONDS);
-        inputQueue.add(serializer.serialize(new ContainerTestMessage("bar")));
-        outputQueue.poll(1000, TimeUnit.MILLISECONDS);
+    public void testMessageDispatch() throws Exception {
+        cache = new HashMap<>();
+        final TestAdaptor adaptor = context.getBean(TestAdaptor.class);
+        assertNotNull(adaptor.dispatcher);
+
+        adaptor.dispatcher.dispatchAnnotated(new ContainerTestMessage("foo"));
+
+        assertTrue(poll(o -> container.getProcessorCount() > 0));
+        Thread.sleep(100);
+        assertEquals("did not create MP", 1, container.getProcessorCount());
+
+        assertTrue(poll(cache, c -> c.get("foo") != null));
+        final TestProcessor mp = cache.get("foo");
+        assertNotNull("MP not associated with expected key", mp);
+        assertEquals("activation count, 1st message", 1, mp.activationCount);
+        assertEquals("invocation count, 1st message", 1, mp.invocationCount);
+
+        adaptor.dispatcher.dispatchAnnotated(new ContainerTestMessage("foo"));
+        assertTrue(poll(mp, o -> o.invocationCount > 1));
+        Thread.sleep(100);
+
+        assertEquals("activation count, 2nd message", 1, mp.activationCount);
+        assertEquals("invocation count, 2nd message", 2, mp.invocationCount);
+    }
+
+    @Test
+    public void testInvokeOutput() throws Exception {
+        outputMessages = new ArrayList<OutputMessage>();
+        cache = new HashMap<>();
+
+        final TestAdaptor adaptor = context.getBean(TestAdaptor.class);
+        assertNotNull(adaptor.dispatcher);
+        adaptor.dispatcher.dispatchAnnotated(new ContainerTestMessage("foo"));
+        adaptor.dispatcher.dispatchAnnotated(new ContainerTestMessage("bar"));
+
+        assertTrue(poll(container, c -> c.getProcessorCount() > 1));
+        Thread.sleep(100);
 
         assertEquals("number of MP instances", 2, container.getProcessorCount());
-        assertTrue("queue is empty", outputQueue.isEmpty());
 
-        container.outputPass();
-        final OutputMessage out1 = serializer.deserialize((byte[]) outputQueue.poll(1000, TimeUnit.MILLISECONDS), OutputMessage.class);
-        final OutputMessage out2 = serializer.deserialize((byte[]) outputQueue.poll(1000, TimeUnit.MILLISECONDS), OutputMessage.class);
+        try (NodeManager nman = addOutputCatchStage();) {
 
-        assertTrue("messages received", (out1 != null) && (out2 != null));
-        assertEquals("no more messages in queue", 0, outputQueue.size());
+            final TestProcessor mp = cache.get("foo");
+            assertTrue(poll(mp, m -> mp.invocationCount > 0));
+            Thread.sleep(100);
+            assertEquals("invocation count, 1st message", 1, mp.invocationCount);
 
-        // order of messages is not guaranteed, so we need to aggregate keys
-        final HashSet<String> messageKeys = new HashSet<String>();
-        messageKeys.add(out1.getKey());
-        messageKeys.add(out2.getKey());
-        assertTrue("first MP sent output", messageKeys.contains("foo"));
-        assertTrue("second MP sent output", messageKeys.contains("bar"));
+            // because the sessionFactory is shared and the appname is the same, we should be in the same app
+            container.outputPass();
+
+            assertTrue(poll(outputMessages, o -> o.size() > 1));
+            Thread.sleep(100);
+            assertEquals(2, outputMessages.size());
+
+            // no new mps created in the first one
+            assertEquals("did not create MP", 2, container.getProcessorCount());
+
+            // but the invocation count should have increased since the output cycles feeds messages back to this cluster
+            assertTrue(poll(mp, m -> mp.invocationCount > 1));
+            Thread.sleep(100);
+            assertEquals("invocation count, 1st message", 2, mp.invocationCount);
+
+            // // order of messages is not guaranteed, so we need to aggregate keys
+            final HashSet<String> messageKeys = new HashSet<String>();
+
+            messageKeys.add(outputMessages.get(0).getKey());
+            messageKeys.add(outputMessages.get(1).getKey());
+            assertTrue("first MP sent output", messageKeys.contains("foo"));
+            assertTrue("second MP sent output", messageKeys.contains("bar"));
+        }
     }
 
     @Test
-    public void testOutputInvoker() throws Exception {
-        inputQueue.add(serializer.serialize(new ContainerTestMessage("foo")));
-        final ContainerTestMessage out1 = serializer.deserialize((byte[]) outputQueue.poll(1000, TimeUnit.MILLISECONDS), ContainerTestMessage.class);
-        assertTrue("messages received", (out1 != null));
-
-        assertEquals("number of MP instances", 1, container.getProcessorCount());
-        assertTrue("queue is empty", outputQueue.isEmpty());
-    }
-
-    @Test
-    public void testMtInvokeOutput()
-            throws Exception {
+    public void testMtInvokeOutput() throws Exception {
+        outputMessages = new ArrayList<OutputMessage>();
         final int numInstances = 20;
         final int concurrency = 5;
 
         container.setConcurrency(concurrency);
 
+        final TestAdaptor adaptor = context.getBean(TestAdaptor.class);
+        assertNotNull(adaptor.dispatcher);
         for (int i = 0; i < numInstances; i++)
-            inputQueue.put(serializer.serialize(new ContainerTestMessage("foo" + i)));
-        for (int i = 0; i < numInstances; i++)
-            assertNotNull(outputQueue.poll(baseTimeoutMillis, TimeUnit.MILLISECONDS));
+            adaptor.dispatcher.dispatchAnnotated(new ContainerTestMessage("foo" + i));
 
-        assertEquals("number of MP instances", numInstances, container.getProcessorCount());
-        assertTrue("queue is empty", outputQueue.isEmpty());
+        assertTrue(poll(container, c -> c.getProcessorCount() > 19));
+        Thread.sleep(100);
+        assertEquals("number of MP instances", 20, container.getProcessorCount());
 
-        container.outputPass();
-        for (int i = 0; i < numInstances; i++)
-            assertNotNull(serializer.deserialize((byte[]) outputQueue.poll(1000, TimeUnit.MILLISECONDS), Object.class));
-
-        assertEquals("no more messages in queue", 0, outputQueue.size());
+        try (NodeManager nman = addOutputCatchStage();) {
+            container.outputPass();
+            assertTrue(poll(outputMessages, o -> o.size() > 19));
+            Thread.sleep(100);
+            assertEquals(20, outputMessages.size());
+        }
     }
 
     @Test
     public void testEvictable() throws Exception {
-        inputQueue.add(serializer.serialize(new ContainerTestMessage("foo")));
-        assertNotNull(outputQueue.poll(baseTimeoutMillis, TimeUnit.MILLISECONDS));
+        final TestProcessor mp = createAndGet("foo");
 
-        assertEquals("did not create MP", 1, container.getProcessorCount());
-
-        final TestProcessor mp = (TestProcessor) container.getMessageProcessor("foo");
-        assertNotNull("MP not associated with expected key", mp);
-        assertEquals("activation count, 1st message", 1, mp.activationCount);
-        assertEquals("invocation count, 1st message", 1, mp.invocationCount);
-
-        inputQueue.add(serializer.serialize(new ContainerTestMessage("foo")));
-        assertNotNull(outputQueue.poll(baseTimeoutMillis, TimeUnit.MILLISECONDS));
-
-        assertEquals("activation count, 2nd message", 1, mp.activationCount);
-        assertEquals("invocation count, 2nd message", 2, mp.invocationCount);
         final TestProcessor prototype = context.getBean(TestProcessor.class);
         final int tmpCloneCount = prototype.cloneCount.intValue();
 
         mp.evict.set(true);
         container.evict();
-        inputQueue.add(serializer.serialize(new ContainerTestMessage("foo")));
-        assertNotNull(outputQueue.poll(baseTimeoutMillis, TimeUnit.MILLISECONDS));
 
+        final TestAdaptor adaptor = context.getBean(TestAdaptor.class);
+        adaptor.dispatcher.dispatchAnnotated(new ContainerTestMessage("foo"));
+        assertTrue(poll(o -> prototype.cloneCount.intValue() > tmpCloneCount));
+        Thread.sleep(1000);
         assertEquals("Clone count, 2nd message", tmpCloneCount + 1, prototype.cloneCount.intValue());
     }
 
     @Test
     public void testEvictableWithPassivateException() throws Exception {
-        inputQueue.add(serializer.serialize(new ContainerTestMessage("foo")));
-        assertNotNull(outputQueue.poll(baseTimeoutMillis, TimeUnit.MILLISECONDS));
-
-        assertEquals("did not create MP", 1, container.getProcessorCount());
-
-        final TestProcessor mp = (TestProcessor) container.getMessageProcessor("foo");
-        assertNotNull("MP not associated with expected key", mp);
-        assertEquals("activation count, 1st message", 1, mp.activationCount);
-        assertEquals("invocation count, 1st message", 1, mp.invocationCount);
+        final TestProcessor mp = createAndGet("foo");
         mp.throwPassivateException.set(true);
 
-        inputQueue.add(serializer.serialize(new ContainerTestMessage("foo")));
-        assertNotNull(outputQueue.poll(baseTimeoutMillis, TimeUnit.MILLISECONDS));
-
-        assertEquals("activation count, 2nd message", 1, mp.activationCount);
-        assertEquals("invocation count, 2nd message", 2, mp.invocationCount);
         final TestProcessor prototype = context.getBean(TestProcessor.class);
         final int tmpCloneCount = prototype.cloneCount.intValue();
 
         mp.evict.set(true);
         container.evict();
+        assertTrue(poll(o -> mp.passivateExceptionCount.get() > 0));
+        Thread.sleep(100);
         assertEquals("Passivate Exception Thrown", 1, mp.passivateExceptionCount.get());
 
-        inputQueue.add(serializer.serialize(new ContainerTestMessage("foo")));
-        assertNotNull(outputQueue.poll(baseTimeoutMillis, TimeUnit.MILLISECONDS));
-
+        final TestAdaptor adaptor = context.getBean(TestAdaptor.class);
+        adaptor.dispatcher.dispatchAnnotated(new ContainerTestMessage("foo"));
+        assertTrue(poll(o -> prototype.cloneCount.intValue() > tmpCloneCount));
+        Thread.sleep(1000);
         assertEquals("Clone count, 2nd message", tmpCloneCount + 1, prototype.cloneCount.intValue());
     }
 
     @Test
     public void testEvictableWithBusyMp() throws Throwable {
-        // first set the receiver to failFast
-
-        // This forces the instantiation of an Mp
-        inputQueue.add(serializer.serialize(new ContainerTestMessage("foo")));
-        // Once the poll finishes the Mp is instantiated and handling messages.
-        assertNotNull(outputQueue.poll(baseTimeoutMillis, TimeUnit.MILLISECONDS));
-
-        assertEquals("did not create MP", 1, container.getProcessorCount());
-
-        final TestProcessor mp = (TestProcessor) container.getMessageProcessor("foo");
-        assertNotNull("MP not associated with expected key", mp);
-        assertEquals("activation count, 1st message", 1, mp.activationCount);
-        assertEquals("invocation count, 1st message", 1, mp.invocationCount);
+        final TestProcessor mp = createAndGet("foo");
 
         // now we're going to cause the processing to be held up.
         mp.latch = new CountDownLatch(1);
         mp.evict.set(true); // allow eviction
 
         // sending it a message will now cause it to hang up while processing
-        inputQueue.add(serializer.serialize(new ContainerTestMessage("foo")));
+        final TestAdaptor adaptor = context.getBean(TestAdaptor.class);
+        adaptor.dispatcher.dispatchAnnotated(new ContainerTestMessage("foo"));
 
         final TestProcessor prototype = context.getBean(TestProcessor.class);
 
@@ -387,14 +491,7 @@ public class TestContainer {
         final int tmpCloneCount = prototype.cloneCount.intValue();
 
         // invocation count should go to 2
-        assertTrue(TestUtils.poll(baseTimeoutMillis, mp, new TestUtils.Condition<TestProcessor>() {
-            @Override
-            public boolean conditionMet(final TestProcessor o) {
-                return o.invocationCount == 2;
-            }
-        }));
-
-        assertNull(outputQueue.peek()); // this is a double check that no message got all the way
+        assertTrue(poll(mp, o -> o.invocationCount == 2));
 
         // now kick off the evict in a separate thread since we expect it to hang
         // until the mp becomes unstuck.
@@ -409,482 +506,83 @@ public class TestContainer {
         thread.start();
 
         // now check to make sure eviction doesn't complete.
-        Thread.sleep(50); // just a little to give any mistakes a change to work themselves through
+        Thread.sleep(100); // just a little to give any mistakes a change to work themselves through
         assertFalse(evictIsComplete.get()); // make sure eviction didn't finish
 
         mp.latch.countDown(); // this lets it go
 
         // wait until the eviction completes
-        assertTrue(TestUtils.poll(baseTimeoutMillis, evictIsComplete, new TestUtils.Condition<AtomicBoolean>() {
-            @Override
-            public boolean conditionMet(final AtomicBoolean o) {
-                return o.get();
-            }
-        }));
-
-        // now it comes through.
-        assertNotNull(outputQueue.poll(baseTimeoutMillis, TimeUnit.MILLISECONDS));
-
+        assertTrue(poll(evictIsComplete, o -> o.get()));
+        Thread.sleep(100);
         assertEquals("activation count, 2nd message", 1, mp.activationCount);
         assertEquals("invocation count, 2nd message", 2, mp.invocationCount);
 
-        inputQueue.add(serializer.serialize(new ContainerTestMessage("foo")));
-        assertNotNull(outputQueue.poll(baseTimeoutMillis, TimeUnit.MILLISECONDS));
-
+        adaptor.dispatcher.dispatchAnnotated(new ContainerTestMessage("foo"));
+        assertTrue(poll(o -> prototype.cloneCount.intValue() > tmpCloneCount));
+        Thread.sleep(1000);
         assertEquals("Clone count, 2nd message", tmpCloneCount + 1, prototype.cloneCount.intValue());
     }
 
     @Test
-    public void testEvictCollision() throws Throwable {
-        // This forces the instantiation of an Mp
-        try (final BlockingQueueAdaptor adaptor = context.getBean(BlockingQueueAdaptor.class);) {
-            assertNotNull(adaptor);
-            adaptor.setFailFast(true);
-
-            inputQueue.add(serializer.serialize(new ContainerTestMessage("foo")));
-            // Once the poll finishes the Mp is instantiated and handling messages.
-            assertNotNull(outputQueue.poll(baseTimeoutMillis, TimeUnit.MILLISECONDS));
-
-            assertEquals("did not create MP", 1, container.getProcessorCount());
-
-            final TestProcessor mp = (TestProcessor) container.getMessageProcessor("foo");
-            assertNotNull("MP not associated with expected key", mp);
-            assertEquals("activation count, 1st message", 1, mp.activationCount);
-            assertEquals("invocation count, 1st message", 1, mp.invocationCount);
-
-            // now we're going to cause the passivate to be held up.
-            mp.blockPassivate = new CountDownLatch(1);
-            mp.evict.set(true); // allow eviction
-
-            // now kick off the evict in a separate thread since we expect it to hang
-            // until the mp becomes unstuck.
-            final AtomicBoolean evictIsComplete = new AtomicBoolean(false); // this will allow us to see the evict pass complete
-            final Thread thread = new Thread(new Runnable() {
-                @Override
-                public void run() {
-                    container.evict();
-                    evictIsComplete.set(true);
-                }
-            });
-            thread.start();
-
-            Thread.sleep(50); // let it get going.
-            assertFalse(evictIsComplete.get()); // check to see we're hung.
-
-            final MetricGetters sc = (MetricGetters) container.getStatsCollector();
-            assertEquals(0, sc.getMessageCollisionCount());
-
-            // sending it a message will now cause it to have the collision tick up
-            inputQueue.add(serializer.serialize(new ContainerTestMessage("foo")));
-
-            assertTrue(TestUtils.poll(baseTimeoutMillis, sc, new TestUtils.Condition<MetricGetters>() {
-                @Override
-                public boolean conditionMet(final MetricGetters o) {
-                    return o.getMessageCollisionCount() == 1;
-                }
-            }));
-
-            // now let the evict finish
-            mp.blockPassivate.countDown();
-
-            // wait until the eviction completes
-            assertTrue(TestUtils.poll(baseTimeoutMillis, evictIsComplete, new TestUtils.Condition<AtomicBoolean>() {
-                @Override
-                public boolean conditionMet(final AtomicBoolean o) {
-                    return o.get();
-                }
-            }));
-
-            // invocationCount should still be 1 from the initial invocation that caused the clone
-            assertEquals(1, mp.invocationCount);
-
-            // send a message that should go through
-            inputQueue.add(serializer.serialize(new ContainerTestMessage("foo")));
-
-            // Once the poll finishes a new Mp is instantiated and handling messages.
-            assertNotNull(outputQueue.poll(baseTimeoutMillis, TimeUnit.MILLISECONDS));
-
-            final TestProcessor mp2 = (TestProcessor) container.getMessageProcessor("foo");
-
-            // make sure this new Mp isn't the old one.
-            assertTrue(mp != mp2);
-        }
-
-    }
-
-    @Test
     public void testEvictCollisionWithBlocking() throws Throwable {
-        // for this test we need to undo the setup
-        tearDown();
+        final TestProcessor mp = createAndGet("foo");
 
-        // and re-setUp setting failFast to false.
-        setUp("false");
+        // now we're going to cause the passivate to be held up.
+        mp.blockPassivate = new CountDownLatch(1);
+        mp.evict.set(true); // allow eviction
 
-        // This forces the instantiation of an Mp
-        try (final BlockingQueueAdaptor adaptor = context.getBean(BlockingQueueAdaptor.class);) {
-            assertNotNull(adaptor);
-
-            inputQueue.add(serializer.serialize(new ContainerTestMessage("foo")));
-            // Once the poll finishes the Mp is instantiated and handling messages.
-            assertNotNull(outputQueue.poll(baseTimeoutMillis, TimeUnit.MILLISECONDS));
-
-            assertEquals("did not create MP", 1, container.getProcessorCount());
-
-            final TestProcessor mp = (TestProcessor) container.getMessageProcessor("foo");
-            assertNotNull("MP not associated with expected key", mp);
-            assertEquals("activation count, 1st message", 1, mp.activationCount);
-            assertEquals("invocation count, 1st message", 1, mp.invocationCount);
-
-            // now we're going to cause the passivate to be held up.
-            mp.blockPassivate = new CountDownLatch(1);
-            mp.evict.set(true); // allow eviction
-
-            // now kick off the evict in a separate thread since we expect it to hang
-            // until the mp becomes unstuck.
-            final AtomicBoolean evictIsComplete = new AtomicBoolean(false); // this will allow us to see the evict pass complete
-            final Thread thread = new Thread(new Runnable() {
-                @Override
-                public void run() {
-                    container.evict();
-                    evictIsComplete.set(true);
-                }
-            });
-            thread.start();
-
-            Thread.sleep(500); // let it get going.
-            assertFalse(evictIsComplete.get()); // check to see we're hung.
-
-            final MetricGetters sc = (MetricGetters) container.getStatsCollector();
-            assertEquals(0, sc.getMessageCollisionCount());
-
-            // sending it a message will now cause it to have the collision tick up
-            inputQueue.add(serializer.serialize(new ContainerTestMessage("foo")));
-
-            // give it some time.
-            Thread.sleep(100);
-
-            // make sure there's no collision
-            assertEquals(0, sc.getMessageCollisionCount());
-
-            // make sure the message didn't get through
-            assertNull(outputQueue.peek());
-
-            // make sure no message got handled
-            assertEquals(1, mp.invocationCount); // 1 is the initial invocation that caused the instantiation.
-
-            // now let the evict finish
-            mp.blockPassivate.countDown();
-
-            // wait until the eviction completes
-            assertTrue(TestUtils.poll(baseTimeoutMillis, evictIsComplete, new TestUtils.Condition<AtomicBoolean>() {
-                @Override
-                public boolean conditionMet(final AtomicBoolean o) {
-                    return o.get();
-                }
-            }));
-
-            // Once the poll finishes a new Mp is instantiated and handling messages.
-            assertNotNull(outputQueue.poll(baseTimeoutMillis, TimeUnit.MILLISECONDS));
-
-            // get the new Mp
-            final TestProcessor mp2 = (TestProcessor) container.getMessageProcessor("foo");
-
-            // invocationCount should be 1 from the initial invocation that caused the clone, and no more
-            assertEquals(1, mp.invocationCount);
-            assertEquals(1, mp2.invocationCount);
-            assertTrue(mp != mp2);
-
-            // send a message that should go through
-            inputQueue.add(serializer.serialize(new ContainerTestMessage("foo")));
-
-            // Once the poll finishes mp2 invocationCount should be incremented
-            assertNotNull(outputQueue.poll(baseTimeoutMillis, TimeUnit.MILLISECONDS));
-
-            assertEquals(1, mp.invocationCount);
-            assertEquals(2, mp2.invocationCount);
-        }
-    }
-
-    static class FixedInbound implements RoutingStrategy.Inbound {
-        AtomicReference<Set<Object>> validKeys = new AtomicReference<Set<Object>>(new HashSet<Object>());
-
-        @Override
-        public void stop() {}
-
-        @Override
-        public boolean doesMessageKeyBelongToNode(final Object messageKey) {
-            return validKeys.get().contains(messageKey);
-        }
-
-        public FixedInbound set(final Object... keys) {
-            validKeys.set(new HashSet<Object>(Arrays.asList(keys)));
-            return this;
-        }
-
-        public FixedInbound clear() {
-            validKeys.set(new HashSet<Object>(Arrays.asList()));
-            return this;
-        }
-    }
-
-    static class FixedKeySource implements KeySource<String> {
-        AtomicReference<List<String>> keys = new AtomicReference<List<String>>(new ArrayList<String>());
-
-        @Override
-        public Iterable<String> getAllPossibleKeys() {
-            return keys.get();
-        }
-
-        public FixedKeySource set(final String[]... keys) {
-            final List<String> newKeys = new ArrayList<String>();
-            for (final String[] keyset : keys)
-                newKeys.addAll(Arrays.asList(keyset));
-            this.keys.set(newKeys);
-            return this;
-        }
-    }
-
-    @Test
-    public void testKeyspaceExpandThenContraction() throws Throwable {
-        final String[] keys = { "foo1", "foo2" };
-
-        // set an inbound strategy that provides a known value
-        final FixedInbound inbound = new FixedInbound().set((Object[]) keys);
-        final FixedKeySource keysource = new FixedKeySource().set(keys);
-
-        // set a keysource with 2 keys
-        container.setKeySource(keysource);
-
-        container.keyspaceResponsibilityChanged(inbound, false, true);
-
-        final TestProcessor prototype = context.getBean(TestProcessor.class);
-
-        assertTrue(TestUtils.poll(baseTimeoutMillis, prototype.cloneCount, new TestUtils.Condition<AtomicInteger>() {
-            @Override
-            public boolean conditionMet(final AtomicInteger o) {
-                return o.intValue() == 2;
-            }
-        }));
-
-        Thread.sleep(10);
-        assertEquals(2, prototype.cloneCount.intValue());
-
-        inbound.clear(); // force the Inbound to deny that any Mp should run here.
-        container.keyspaceResponsibilityChanged(inbound, true, false);
-
-        assertTrue(TestUtils.poll(baseTimeoutMillis, container, new TestUtils.Condition<MpContainer>() {
-            @Override
-            public boolean conditionMet(final MpContainer o) {
-                return o.getInstances().size() == 0;
-            }
-        }));
-
-        Thread.sleep(10);
-        assertEquals(0, container.getInstances().size());
-    }
-
-    @Test
-    public void testKeyspaceExpandAndContraction() throws Throwable {
-        final String[] keys = { "foo1", "foo2" };
-        final String[] keysShard2 = { "foo3", "foo4" };
-
-        // set an inbound strategy that provides a known value
-        final FixedInbound inbound = new FixedInbound().set((Object[]) keys);
-        final FixedKeySource keysource = new FixedKeySource().set(keys, keysShard2);
-
-        // set a keysource with 2 keys
-        container.setKeySource(keysource);
-
-        container.keyspaceResponsibilityChanged(inbound, false, true);
-
-        final TestProcessor prototype = context.getBean(TestProcessor.class);
-        assertTrue(TestUtils.poll(baseTimeoutMillis, prototype.cloneCount, new TestUtils.Condition<AtomicInteger>() {
-            @Override
-            public boolean conditionMet(final AtomicInteger o) {
-                return o.intValue() == 2;
-            }
-        }));
-
-        Thread.sleep(10);
-        assertEquals(2, prototype.cloneCount.intValue());
-
-        inbound.set((Object[]) keysShard2); // force the Inbound to deny that any Mp should run here.
-        container.keyspaceResponsibilityChanged(inbound, true, true);
-
-        // check to make sure the total clone count is now 4 since two new Mps should be there
-        assertTrue(TestUtils.poll(baseTimeoutMillis, prototype.cloneCount, new TestUtils.Condition<AtomicInteger>() {
-            @Override
-            public boolean conditionMet(final AtomicInteger o) {
-                return o.intValue() == 4;
-            }
-        }));
-
-        assertTrue(TestUtils.poll(baseTimeoutMillis, container, new TestUtils.Condition<MpContainer>() {
-            @Override
-            public boolean conditionMet(final MpContainer o) {
-                return o.getInstances().size() == 2;
-            }
-        }));
-
-        Thread.sleep(10);
-        assertEquals(2, container.getInstances().size());
-    }
-
-    @Test
-    public void testOverlappingKeyspaceContraction() throws Throwable {
-        // need to get hold of the block passivate latch and set it to 1
-        final TestProcessor prototype = context.getBean(TestProcessor.class);
-        final CountDownLatch blockPassivate = new CountDownLatch(1);
-        prototype.blockPassivate = blockPassivate;
-
-        final String[] keys = { "foo1", "foo2" };
-
-        // set an inbound strategy that provides a known value
-        final FixedInbound inbound = new FixedInbound().set((Object[]) keys);
-        final FixedKeySource keysource = new FixedKeySource().set(keys);
-
-        // set a keysource with 2 keys
-        container.setKeySource(keysource);
-
-        container.keyspaceResponsibilityChanged(inbound, false, true);
-
-        assertTrue(TestUtils.poll(baseTimeoutMillis, prototype.cloneCount, new TestUtils.Condition<AtomicInteger>() {
-            @Override
-            public boolean conditionMet(final AtomicInteger o) {
-                return o.intValue() == 2;
-            }
-        }));
-
-        Thread.sleep(10);
-        assertEquals(2, prototype.cloneCount.intValue());
-
-        // ok ... we have a container with 2 mps.
-        // now we're going to passivate but the passivate will block
-
-        inbound.clear(); // force the Inbound to deny that any Mp should run here.
-        container.keyspaceResponsibilityChanged(inbound, true, false);
-
-        // the Mp deletion should be hung in passivate on the frist one ... this test will break if eviction
-        // becomes concurrent since both Mps will be blocked and released at the same time. We want the
-        // second.
-
-        assertTrue(TestUtils.poll(baseTimeoutMillis, prototype.passivateCount, new TestUtils.Condition<AtomicLong>() {
-            @Override
-            public boolean conditionMet(final AtomicLong o) {
-                return o.intValue() == 1;
-            }
-        }));
-        Thread.sleep(10);
-        assertEquals(1, prototype.passivateCount.get());
-
-        // kick force a redo of the keyspaceResponsibilityChange. This will hang without the latch so
-        // we kick it off in the background. Here we are going to reset the inbound so that it rescues the
-        // other Mp
-        inbound.set((Object[]) keys);
-        final AtomicBoolean isRunningKSChange = new AtomicBoolean(false);
-        final Thread t = new Thread(new Runnable() {
+        // now kick off the evict in a separate thread since we expect it to hang
+        // until the mp becomes unstuck.
+        final AtomicBoolean evictIsComplete = new AtomicBoolean(false); // this will allow us to see the evict pass complete
+        final Thread thread = new Thread(new Runnable() {
             @Override
             public void run() {
-                try {
-                    isRunningKSChange.set(true);
-                    container.keyspaceResponsibilityChanged(inbound, true, false);
-                } finally {
-                    isRunningKSChange.set(false);
-                }
+                container.evict();
+                evictIsComplete.set(true);
             }
         });
-        t.setDaemon(true);
-        t.start();
+        thread.start();
 
-        // let's make sure the keyspaceChanged call is hanging
-        assertTrue(TestUtils.poll(baseTimeoutMillis, isRunningKSChange, new TestUtils.Condition<AtomicBoolean>() {
-            @Override
-            public boolean conditionMet(final AtomicBoolean o) {
-                return o.get();
-            }
-        }));
-        Thread.sleep(10);
-        assertTrue(isRunningKSChange.get());
+        Thread.sleep(500); // let it get going.
+        assertFalse(evictIsComplete.get()); // check to see we're hung.
 
-        // the above will block unless the latch is released
-        blockPassivate.countDown(); // this lets them all go
+        final MetricGetters sc = (MetricGetters) container.getStatsCollector();
+        assertEquals(0, sc.getMessageCollisionCount());
 
-        // this should result in preservation of the other Mps since we preempted the keyspace deletion
-        assertTrue(TestUtils.poll(baseTimeoutMillis, container, new TestUtils.Condition<MpContainer>() {
-            @Override
-            public boolean conditionMet(final MpContainer o) {
-                return o.getInstances().size() == 1;
-            }
-        }));
-        Thread.sleep(10);
-        assertEquals(1, container.getInstances().size());
+        // sending it a message will now cause it to have the collision tick up
+        final TestAdaptor adaptor = context.getBean(TestAdaptor.class);
+        adaptor.dispatcher.dispatchAnnotated(new ContainerTestMessage("foo"));
 
-        assertTrue(TestUtils.poll(baseTimeoutMillis, isRunningKSChange, new TestUtils.Condition<AtomicBoolean>() {
-            @Override
-            public boolean conditionMet(final AtomicBoolean o) {
-                return !o.get();
-            }
-        }));
-    }
+        // give it some time.
+        Thread.sleep(100);
 
-    @Test
-    public void testKeyspaceContractExpandRace() throws Throwable {
-        // need to get hold of the block passivate latch and set it to 1
-        final TestProcessor prototype = context.getBean(TestProcessor.class);
-        final CountDownLatch blockPassivate = new CountDownLatch(1);
-        prototype.blockPassivate = blockPassivate;
+        // make sure there's no collision
+        assertEquals(0, sc.getMessageCollisionCount());
 
-        final String[] keys = new String[10000];
-        final String[] keys2 = new String[10000];
-        final String[] emptyKeys = new String[0];
-        for (int i = 0; i < keys.length; i++) {
-            keys[i] = String.valueOf(i);
-            keys2[i] = String.valueOf(i + keys.length);
-        }
+        // make sure no message got handled
+        assertEquals(1, mp.invocationCount); // 1 is the initial invocation that caused the instantiation.
 
-        // set an inbound strategy that provides a known value
-        final FixedInbound inboundShards1 = new FixedInbound().set((Object[]) keys);
-        final FixedInbound inboundShards2 = new FixedInbound().set((Object[]) keys2);
-        final FixedInbound inboundShardsEmpty = new FixedInbound().set((Object[]) emptyKeys);
-        // The keysource contains ALL keys even if they aren't in the current container
-        final FixedKeySource keysource = new FixedKeySource().set(keys, keys2);
+        // now let the evict finish
+        mp.blockPassivate.countDown();
 
-        // set a keysource with all of the keys
-        container.setKeySource(keysource);
+        // wait until the eviction completes
+        assertTrue(poll(evictIsComplete, o -> o.get()));
 
-        // first run the pre-initialization work to create the Mps
-        container.keyspaceResponsibilityChanged(inboundShards1, false, true);
+        // Once the poll finishes a new Mp is instantiated and handling messages.
+        assertTrue(poll(cache, c -> c.get("foo") != null));
+        final TestProcessor mp2 = cache.get("foo");
+        assertNotNull("MP not associated with expected key", mp);
 
-        // assert the exact number were created.
-        TestUtils.poll(baseTimeoutMillis * 10, container, new TestUtils.Condition<MpContainer>() {
-            @Override
-            public boolean conditionMet(final MpContainer o) {
-                return o.getProcessorCount() == keys.length;
-            }
-        });
-        assertEquals(keys.length, container.getProcessorCount());
+        // invocationCount should be 1 from the initial invocation that caused the clone, and no more
+        assertEquals(1, mp.invocationCount);
+        assertEquals(1, mp2.invocationCount);
+        assertTrue(mp != mp2);
 
-        // make sure that doesn't change
-        Thread.sleep(10);
-        assertEquals(keys.length, container.getProcessorCount());
-
-        final FixedInbound[] inbounds = { inboundShards1, inboundShards2 };
-        blockPassivate.countDown();
-        for (int i = 0; i < 1; i++) {
-            // now we need a rapid contract followed by expand
-            container.keyspaceResponsibilityChanged(inboundShardsEmpty, true, false);
-            container.keyspaceResponsibilityChanged(inbounds[i & 1], false, true);
-            Thread.sleep(1000);
-            blockPassivate.countDown();
-        }
-
-        // make sure we're back.
-        TestUtils.poll(baseTimeoutMillis * 10, container, new TestUtils.Condition<MpContainer>() {
-            @Override
-            public boolean conditionMet(final MpContainer o) {
-                return o.getProcessorCount() == keys2.length;
-            }
-        });
-        assertEquals("Num mps is " + container.getProcessorCount(), keys2.length, container.getProcessorCount());
+        // send a message that should go through
+        adaptor.dispatcher.dispatchAnnotated(new ContainerTestMessage("foo"));
+        assertTrue(poll(o -> mp2.invocationCount > 1));
+        Thread.sleep(100);
+        assertEquals(1, mp.invocationCount);
+        assertEquals(2, mp2.invocationCount);
     }
 }

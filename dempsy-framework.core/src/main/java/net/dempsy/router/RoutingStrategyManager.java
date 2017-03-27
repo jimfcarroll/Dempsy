@@ -1,9 +1,10 @@
 package net.dempsy.router;
 
-import net.dempsy.Manager;
+import net.dempsy.ServiceManager;
 
-public class RoutingStrategyManager extends Manager<RoutingStrategy.Outbound> {
+public class RoutingStrategyManager extends ServiceManager<RoutingStrategy.Factory> {
     public RoutingStrategyManager() {
-        super(RoutingStrategy.Outbound.class);
+        super(RoutingStrategy.Factory.class);
     }
+
 }

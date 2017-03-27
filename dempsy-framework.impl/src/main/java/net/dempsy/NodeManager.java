@@ -15,34 +15,49 @@ import org.slf4j.LoggerFactory;
 import net.dempsy.cluster.ClusterInfoException;
 import net.dempsy.cluster.ClusterInfoSession;
 import net.dempsy.cluster.DirMode;
+import net.dempsy.config.Cluster;
 import net.dempsy.config.ClusterId;
 import net.dempsy.config.Node;
 import net.dempsy.container.Container;
 import net.dempsy.messages.Adaptor;
+import net.dempsy.monitoring.DummyStatsCollector;
+import net.dempsy.monitoring.StatsCollector;
 import net.dempsy.router.RoutingStrategy;
 import net.dempsy.router.RoutingStrategy.ContainerAddress;
 import net.dempsy.router.RoutingStrategy.Inbound;
+import net.dempsy.router.RoutingStrategyManager;
+import net.dempsy.threading.DefaultThreadingModel;
+import net.dempsy.threading.ThreadingModel;
 import net.dempsy.transport.NodeAddress;
 import net.dempsy.transport.Receiver;
+import net.dempsy.transport.TransportManager;
 import net.dempsy.util.SafeString;
 import net.dempsy.util.executor.AutoDisposeSingleThreadScheduler;
 import net.dempsy.utils.PersistentTask;
 
-public class NodeManager implements Infrastructure {
+public class NodeManager implements Infrastructure, AutoCloseable {
     private final static Logger LOGGER = LoggerFactory.getLogger(NodeManager.class);
     private static final long RETRY_PERIOND_MILLIS = 500L;
 
     private Node node = null;
     private ClusterInfoSession session;
+    private final AutoDisposeSingleThreadScheduler persistenceScheduler = new AutoDisposeSingleThreadScheduler("Dempsy-pestering-");
+
+    private final AtomicBoolean isRunning = new AtomicBoolean(false);
+
+    private final ThreadingModel threading = new DefaultThreadingModel().setCoresFactor(1.0).setAdditionalThreads(1)
+            .setMaxNumberOfQueuedLimitedTasks(10000).start();
+
+    // created in start(). Stopped in stop()
+    private Receiver receiver = null;
     private final List<PerContainer> containers = new ArrayList<>();
     private final List<Adaptor> adaptors = new ArrayList<>();
     private Router router = null;
-    private final AutoDisposeSingleThreadScheduler persistenceScheduler = new AutoDisposeSingleThreadScheduler("Dempsy-pestering-");
-
     private PersistentTask keepNodeRegstered = null;
-    private final AtomicBoolean isRunning = new AtomicBoolean(false);
-
     private RootPaths rootPaths = null;
+    private StatsCollector statsCollector;
+    private RoutingStrategyManager rsManager = null;
+    private TransportManager tManager = null;
 
     public NodeManager node(final Node node) {
         this.node = node;
@@ -57,28 +72,30 @@ public class NodeManager implements Infrastructure {
         if (this.session != null)
             throw new IllegalStateException("Collaborator session is already set on " + NodeManager.class.getSimpleName());
         this.session = session;
-        this.router = new Router(session);
         return this;
     }
 
     public NodeManager start() throws DempsyException {
         validate();
 
+        statsCollector = (StatsCollector) node.getStatsCollector();
+        if (statsCollector == null)
+            statsCollector = new DummyStatsCollector();
+
         // =====================================
         // set the dispatcher on adaptors and create containers for mp clusters
         node.getClusters().forEach(c -> {
             if (c.isAdaptor()) {
                 final Adaptor adaptor = c.getAdaptor();
-                adaptor.setDispatcher(router);
                 adaptors.add(adaptor);
             } else {
                 final Container con = new Container(c.getMessageProcessor(), c.getClusterId());
-                con.setDispatcher(router);
+                con.setStatCollector(statsCollector);
 
                 // TODO: This is a hack for now.
                 final Manager<RoutingStrategy.Inbound> inboundManager = new Manager<RoutingStrategy.Inbound>(RoutingStrategy.Inbound.class);
                 final RoutingStrategy.Inbound is = inboundManager.getAssociatedInstance(c.getRoutingStrategyId());
-                containers.add(new PerContainer(con, is));
+                containers.add(new PerContainer(con, is, c));
             }
         });
         // =====================================
@@ -87,12 +104,19 @@ public class NodeManager implements Infrastructure {
         // register node with session
         // =====================================
         // first gather node information
-        final Receiver receiver = (Receiver) node.getReceiver();
+        receiver = (Receiver) node.getReceiver();
         final NodeAddress nodeAddress = receiver.getAddress();
+
+        final NodeReceiver nodeReciever = new NodeReceiver(containers.stream().map(pc -> pc.container).collect(Collectors.toList()), threading,
+                statsCollector);
+        receiver.start(nodeReciever, threading);
+
         final String nodeId = nodeAddress.getGuid();
         final Map<ClusterId, ClusterInformation> messageTypesByClusterId = new HashMap<>();
-        node.getClusters().forEach(c -> messageTypesByClusterId.put(c.getClusterId(),
-                new ClusterInformation(c.getRoutingStrategyId(), c.getClusterId(), c.getMessageProcessor().messagesTypesHandled())));
+        containers.stream().map(pc -> pc.clusterDefinition).forEach(c -> {
+            messageTypesByClusterId.put(c.getClusterId(),
+                    new ClusterInformation(c.getRoutingStrategyId(), c.getClusterId(), c.getMessageProcessor().messagesTypesHandled()));
+        });
         final NodeInformation nodeInfo = new NodeInformation(receiver.transportTypeId(), nodeAddress, messageTypesByClusterId);
 
         // Then actually register the Node
@@ -134,9 +158,53 @@ public class NodeManager implements Infrastructure {
             c.inboundStrategy.setContainerDetails(c.container.getClusterId(), new ContainerAddress(nodeAddress, i));
             c.inboundStrategy.start(this);
         });
+
+        this.rsManager = new RoutingStrategyManager();
+        rsManager.start(this);
+        this.tManager = new TransportManager();
+        tManager.start(this);
+        this.router = new Router(rsManager, nodeAddress, nodeReciever, tManager);
+        this.router.start(this);
+        adaptors.forEach(a -> a.setDispatcher(router));
+
+        containers.forEach(pc -> pc.container.setDispatcher(router));
         // =====================================
 
         return this;
+    }
+
+    private static void stopMe(final AutoCloseable ac) {
+        try {
+            if (ac != null)
+                ac.close();
+        } catch (final Exception e) {
+            LOGGER.warn("Couldn't close " + ac.getClass().getSimpleName(), e);
+        }
+    }
+
+    private static void stopMe(final Service ac) {
+        try {
+            if (ac != null)
+                ac.stop();
+        } catch (final Exception e) {
+            LOGGER.warn("Couldn't close " + ac.getClass().getSimpleName(), e);
+        }
+    }
+
+    public void stop() {
+        isRunning.set(false);
+        stopMe(receiver);
+
+        containers.stream().map(pc -> pc.inboundStrategy).forEach(NodeManager::stopMe);
+
+        stopMe(router);
+        stopMe(tManager);
+        stopMe(rsManager);
+    }
+
+    @Override
+    public void close() throws Exception {
+        stop();
     }
 
     public List<Container> getContainers() {
@@ -175,13 +243,24 @@ public class NodeManager implements Infrastructure {
         return rootPaths;
     }
 
+    // Testing accessors
+
+    /**
+     * STRICTLY FOR TESTING
+     */
+    public Router getRouter() {
+        return router;
+    }
+
     private static class PerContainer {
         final Container container;
         final RoutingStrategy.Inbound inboundStrategy;
+        final Cluster clusterDefinition;
 
-        public PerContainer(final Container container, final Inbound inboundStrategy) {
+        public PerContainer(final Container container, final Inbound inboundStrategy, final Cluster clusterDefinition) {
             this.container = container;
             this.inboundStrategy = inboundStrategy;
+            this.clusterDefinition = clusterDefinition;
         }
     }
 
@@ -195,10 +274,6 @@ public class NodeManager implements Infrastructure {
 
     private static String clusters(final String application) {
         return root(application) + "/clusters";
-    }
-
-    private static String cluster(final ClusterId clusterId) {
-        return clusters(clusterId.applicationName) + "/" + clusterId.clusterName;
     }
 
 }

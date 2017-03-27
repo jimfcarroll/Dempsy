@@ -88,8 +88,9 @@ public abstract class PersistentTask implements ClusterInfoWatcher {
 
             retry = !execute();
 
-            if (logger.isTraceEnabled())
-                logger.trace("Managed to " + this + " with the results:" + !retry);
+            if (logger.isTraceEnabled()) {
+                logger.trace((retry ? "Failed" : "Managed") + " to " + this);
+            }
 
         } catch (final RuntimeException th) {
             if (logger.isDebugEnabled())

@@ -20,6 +20,7 @@ import static net.dempsy.utils.test.ConditionPoll.poll;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
@@ -32,49 +33,31 @@ import net.dempsy.transport.MessageTransportException;
 import net.dempsy.transport.Receiver;
 import net.dempsy.transport.Sender;
 import net.dempsy.transport.SenderFactory;
-import net.dempsy.transport.Transport;
-import net.dempsy.transport.blockingqueue.BlockingQueueTransport;
+import net.dempsy.transport.TransportManager;
+import net.dempsy.transport.blockingqueue.BlockingQueueReceiver;
 
 public class BlockingQueueTest {
+
+    private static final String transportTypeId = BlockingQueueReceiver.class.getPackage().getName();
 
     /*
      * Test basic functionality for the BlockingQueue implementation of Message Transport. Verify that messages sent to the Sender arrive at the receiver via handleMessage.
      */
     @Test
     public void testBlockingQueue() throws Exception {
-        final Transport tp = new BlockingQueueTransport();
         final AtomicReference<String> message = new AtomicReference<String>(null);
-        try (ThreadingModel tm = new DefaultThreadingModel();
-                Receiver r = tp.createInbound();
-                SenderFactory sf = tp.createOutbound();
+        final ArrayBlockingQueue<Object> input = new ArrayBlockingQueue<>(16);
+        try (final ThreadingModel tm = new DefaultThreadingModel();
+                final Receiver r = new BlockingQueueReceiver(input);
+                SenderFactory sf = new TransportManager().getAssociatedInstance(transportTypeId);
                 Sender sender = sf.getSender(r.getAddress())) {
-            r.start(msg -> {
+            r.start((final String msg) -> {
                 message.set(new String(msg));
                 return true;
             }, tm);
-            sender.send("Hello".getBytes());
+            sender.send("Hello");
             assertTrue(poll(o -> "Hello".equals(message.get())));
         }
-    }
-
-    /**
-     * Test a non-blocking Transport without an overflow handler on the transport. Should call overflow handler once queue is full.
-     * 
-     * @throws Throwable
-     */
-    @Test(expected = MessageTransportException.class)
-    public void testNonBlockingQueueOverflow() throws Exception {
-        final Transport tp = new BlockingQueueTransport(1, false, null);
-        try (ThreadingModel tm = new DefaultThreadingModel();
-                Receiver r = tp.createInbound();
-                SenderFactory sf = tp.createOutbound();
-                Sender sender = sf.getSender(r.getAddress())) {
-
-            // Not starting the receiver.
-            sender.send("Hello".getBytes()); // this should work
-            sender.send("Hello again".getBytes()); // this should fail
-        }
-
     }
 
     /**
@@ -85,21 +68,21 @@ public class BlockingQueueTest {
      */
     @Test
     public void testBlockingQueueOverflow() throws Throwable {
-        final Transport tp = new BlockingQueueTransport(1, true, null);
         final AtomicReference<String> message = new AtomicReference<String>(null);
+        final ArrayBlockingQueue<Object> input = new ArrayBlockingQueue<>(1);
         try (final ThreadingModel tm = new DefaultThreadingModel();
-                final Receiver r = tp.createInbound();
-                final SenderFactory sf = tp.createOutbound();
-                final Sender sender = sf.getSender(r.getAddress())) {
+                final Receiver r = new BlockingQueueReceiver(input);
+                SenderFactory sf = new TransportManager().getAssociatedInstance(transportTypeId);
+                Sender sender = sf.getSender(r.getAddress())) {
 
             final AtomicBoolean finallySent = new AtomicBoolean(false);
             final AtomicLong receiveCount = new AtomicLong();
 
-            sender.send("Hello".getBytes()); // fill up queue
+            sender.send("Hello"); // fill up queue
 
             final Thread t = new Thread(() -> {
                 try {
-                    sender.send("Hello again".getBytes());
+                    sender.send("Hello again");
                 } catch (final MessageTransportException e) {
                     throw new RuntimeException(e);
                 }
@@ -111,7 +94,7 @@ public class BlockingQueueTest {
             assertFalse(finallySent.get()); // the thread should be hung blocked on the send
 
             // Start the receiver to read
-            r.start(msg -> {
+            r.start((final String msg) -> {
                 message.set(new String(msg));
                 receiveCount.incrementAndGet();
                 return true;

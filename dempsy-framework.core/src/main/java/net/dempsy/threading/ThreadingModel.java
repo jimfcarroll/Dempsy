@@ -49,7 +49,7 @@ public interface ThreadingModel extends AutoCloseable {
     /**
      * Start up the executor
      */
-    public void start();
+    public ThreadingModel start();
 
     /**
      * Perform a clean shutdown of the executor

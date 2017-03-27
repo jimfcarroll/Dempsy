@@ -38,4 +38,10 @@ public class ContainerTestMessage implements Serializable {
     public String getKey() {
         return value;
     }
+
+    @Override
+    public String toString() {
+        return "ContainerTestMessage [value=" + value + "]";
+    }
+
 }

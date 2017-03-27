@@ -46,16 +46,18 @@ import net.dempsy.util.SafeString;
  */
 public class BlockingQueueReceiver implements Runnable, Receiver {
     private static Logger LOGGER = LoggerFactory.getLogger(BlockingQueueReceiver.class);
-    private static final AtomicLong receiverNumber = new AtomicLong();
+    public static final AtomicLong receiverNumber = new AtomicLong();
 
     private final BlockingQueueAddress address;
     private final BlockingQueue<Object> queue;
 
-    private Listener listener = null;
+    private Listener<Object> listener = null;
 
     private final AtomicBoolean running = new AtomicBoolean(false);
     private Thread currentThread = null;
     private boolean shutdown;
+
+    private final static AtomicLong guidGenerator = new AtomicLong(0);
 
     /**
      * <p>
@@ -75,7 +77,7 @@ public class BlockingQueueReceiver implements Runnable, Receiver {
      */
     public BlockingQueueReceiver(final BlockingQueue<Object> queue) {
         this.queue = queue;
-        this.address = new BlockingQueueAddress(queue);
+        this.address = new BlockingQueueAddress(queue, "BlockingQueue_" + guidGenerator.getAndIncrement());
     }
 
     @Override
@@ -89,7 +91,7 @@ public class BlockingQueueReceiver implements Runnable, Receiver {
             running.set(true);
         }
 
-        final Listener curListener = listener;
+        final Listener<Object> curListener = listener;
 
         // This check is cheap but unlocked
         while (!shutdown) {
