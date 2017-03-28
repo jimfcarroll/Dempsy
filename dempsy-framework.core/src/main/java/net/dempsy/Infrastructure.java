@@ -1,6 +1,7 @@
 package net.dempsy;
 
 import net.dempsy.cluster.ClusterInfoSession;
+import net.dempsy.monitoring.StatsCollector;
 import net.dempsy.util.executor.AutoDisposeSingleThreadScheduler;
 
 public interface Infrastructure {
@@ -9,6 +10,8 @@ public interface Infrastructure {
     AutoDisposeSingleThreadScheduler getScheduler();
 
     RootPaths getRootPaths();
+
+    StatsCollector getStatsCollector();
 
     public static class RootPaths {
         public final String rootDir;

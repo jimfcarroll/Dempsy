@@ -21,7 +21,6 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -34,34 +33,38 @@ import org.junit.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import net.dempsy.Dispatcher;
-import net.dempsy.annotations.MessageHandler;
-import net.dempsy.annotations.MessageProcessor;
-import net.dempsy.annotations.Output;
+import net.dempsy.Infrastructure;
+import net.dempsy.ServiceTracker;
+import net.dempsy.cluster.ClusterInfoSession;
 import net.dempsy.config.ClusterId;
+import net.dempsy.container.locking.LockingContainer;
 import net.dempsy.container.mocks.MockInputMessage;
 import net.dempsy.container.mocks.MockOutputMessage;
+import net.dempsy.lifecycle.annotation.MessageHandler;
+import net.dempsy.lifecycle.annotation.MessageProcessor;
+import net.dempsy.lifecycle.annotation.Mp;
+import net.dempsy.lifecycle.annotation.Output;
+import net.dempsy.lifecycle.annotation.utils.KeyExtractor;
+import net.dempsy.messages.Dispatcher;
+import net.dempsy.messages.KeyedMessage;
+import net.dempsy.messages.KeyedMessageWithType;
 import net.dempsy.monitoring.StatsCollector;
-import net.dempsy.monitoring.coda.MetricGetters;
-import net.dempsy.monitoring.coda.StatsCollectorCoda;
-import net.dempsy.monitoring.coda.StatsCollectorFactoryCoda;
-import net.dempsy.serialization.Serializer;
-import net.dempsy.serialization.java.JavaSerializer;
+import net.dempsy.monitoring.basic.BasicStatsCollector;
+import net.dempsy.util.executor.AutoDisposeSingleThreadScheduler;
 
 /**
  * Test load handling / sheding in the MP container. This is probably involved enough to merit not mixing into the existing MPContainer test cases.
  */
-public class TestMpContainerLoadHandling {
+public class TestContainerLoadHandling {
     private void checkStat(final MetricGetters stat) {
         assertEquals(stat.getDispatchedMessageCount(),
-                stat.getMessageFailedCount() + stat.getProcessedMessageCount() +
-                        stat.getDiscardedMessageCount() + stat.getInFlightMessageCount());
+                stat.getMessageFailedCount() + stat.getProcessedMessageCount() + stat.getInFlightMessageCount());
     }
 
     private static int NTHREADS = 2;
-    private static Logger logger = LoggerFactory.getLogger(TestMpContainerLoadHandling.class);
+    private static Logger logger = LoggerFactory.getLogger(TestContainerLoadHandling.class);
 
-    private MpContainer container;
+    private Container container;
     private MetricGetters stats;
     private MockDispatcher dispatcher;
     private CountDownLatch startLatch; // when set, the TestMessageProcessor waits to begin processing
@@ -72,39 +75,63 @@ public class TestMpContainerLoadHandling {
 
     private int sequence = 0;
 
+    ServiceTracker tr = new ServiceTracker();
+
     @Before
     public void setUp() throws Exception {
-        final ClusterId cid = new ClusterId("TestMpContainerLoadHandling", "test" + sequence++);
+        final ClusterId cid = new ClusterId("TestContainerLoadHandling", "test" + sequence++);
         dispatcher = new MockDispatcher();
 
-        final StatsCollectorCoda sc = new StatsCollectorCoda(cid, new StatsCollectorFactoryCoda().getNamingStrategy());
+        final BasicStatsCollector sc = new BasicStatsCollector();
         stats = sc;
-        final JavaSerializer serializer = new JavaSerializer();
 
-        container = new MpContainer(cid);
+        container = tr.track(new LockingContainer())
+                .setMessageProcessor(new MessageProcessor<TestMessageProcessor>(new TestMessageProcessor()))
+                .setClusterId(cid);
         container.setDispatcher(dispatcher);
-        container.setStatCollector(sc);
-        container.setSerializer(serializer);
-        container.setPrototype(new TestMessageProcessor());
+
+        container.start(new Infrastructure() {
+
+            @Override
+            public StatsCollector getStatsCollector() {
+                return sc;
+            }
+
+            @Override
+            public AutoDisposeSingleThreadScheduler getScheduler() {
+                return null;
+            }
+
+            @Override
+            public RootPaths getRootPaths() {
+                return null;
+            }
+
+            @Override
+            public ClusterInfoSession getCollaborator() {
+                return null;
+            }
+        });
 
         forceOutputException = false;
     }
 
     @After
     public void tearDown() throws Exception {
+        tr.stopAll();
         ((StatsCollector) stats).stop();
     }
 
     public static boolean failed = false;
 
     public static class SendMessageThread implements Runnable {
-        MpContainer mpc;
-        Object message;
+        Container mpc;
+        KeyedMessage message;
         boolean block;
 
         static CountDownLatch latch = new CountDownLatch(0);
 
-        public SendMessageThread(final MpContainer mpc, final Object message, final boolean block) {
+        public SendMessageThread(final Container mpc, final KeyedMessage message, final boolean block) {
             this.mpc = mpc;
             this.message = message;
             this.block = block;
@@ -113,10 +140,8 @@ public class TestMpContainerLoadHandling {
         @Override
         public void run() {
             try {
-                final Serializer serializer = new JavaSerializer();
-                final byte[] data = serializer.serialize(message);
-                mpc.onMessage(data, !block); // onmessage is "failfast" which is !block
-            } catch (final IOException e) {
+                mpc.dispatch(message, !block); // onmessage is "failfast" which is !block
+            } catch (final Exception e) {
                 failed = true;
                 System.out.println("FAILED!");
                 e.printStackTrace();
@@ -127,36 +152,38 @@ public class TestMpContainerLoadHandling {
         }
     }
 
+    private static KeyExtractor extractor = new KeyExtractor();
+
+    private static KeyedMessageWithType km(final Object message) throws Exception {
+        return extractor.extract(message).get(0);
+    }
+
     /*
      * Utility methods for tests
      */
-    private void sendMessage(final MpContainer mpc, final Object message, final boolean block) throws Exception {
-        new Thread(new SendMessageThread(mpc, message, block)).start();
+    private void sendMessage(final Container mpc, final Object message, final boolean block) throws Exception {
+        new Thread(new SendMessageThread(mpc, km(message), block)).start();
     }
 
     /*
      * Test Infastructure
      */
-    class MockDispatcher implements Dispatcher {
+    class MockDispatcher extends Dispatcher {
         public CountDownLatch latch = null;
 
-        public List<Object> messages = Collections.synchronizedList(new ArrayList<Object>());
+        public List<KeyedMessageWithType> messages = Collections.synchronizedList(new ArrayList<>());
 
         @Override
-        public void dispatch(final Object message) {
+        public void dispatch(final KeyedMessageWithType message) {
             assertNotNull(message);
             messages.add(message);
             if (latch != null)
                 latch.countDown();
         }
 
-        @Override
-        public ClusterId getThisClusterId() {
-            return null;
-        }
     }
 
-    @MessageProcessor
+    @Mp
     public class TestMessageProcessor implements Cloneable {
         int messageCount = 0;
         String key;
@@ -301,9 +328,9 @@ public class TestMpContainerLoadHandling {
         /// it shoulld be discarded
         assertTrue(imIn.await(2, TimeUnit.SECONDS)); // this means they're all in
         // need to directly dispatch it to avoid a race condition
-        container.dispatch(new MockInputMessage("key" + 0), false);
+        container.dispatch(km(new MockInputMessage("key" + 0)), false);
         assertEquals(1, stats.getDiscardedMessageCount());
-        container.dispatch(new MockInputMessage("key" + 1), false);
+        container.dispatch(km(new MockInputMessage("key" + 1)), false);
         assertEquals(2, stats.getDiscardedMessageCount());
 
         checkStat(stats);
@@ -352,7 +379,7 @@ public class TestMpContainerLoadHandling {
         finishLatch = new CountDownLatch(NTHREADS * 4); // we expect this many messages to be handled.
         imIn = new CountDownLatch(4 * NTHREADS); // this is how many times the message processor handler has been entered
         dispatcher.latch = new CountDownLatch(4 * NTHREADS); // this counts down whenever a message is dispatched
-        SendMessageThread.latch = new CountDownLatch(4 * NTHREADS); // when spawning a thread to send a message into an MpContainer, this counts down once the message sending is complete
+        SendMessageThread.latch = new CountDownLatch(4 * NTHREADS); // when spawning a thread to send a message into an Container, this counts down once the message sending is complete
 
         // invoke NTHREADS * 4 discrete messages each of which should cause an Mp to be created
         for (int i = 0; i < (NTHREADS * 4); i++)
@@ -436,8 +463,8 @@ public class TestMpContainerLoadHandling {
 
         // all output messages were processed
         int outMessages = 0;
-        for (final Object o : dispatcher.messages) {
-            final MockOutputMessage m = (MockOutputMessage) o;
+        for (final KeyedMessageWithType o : dispatcher.messages) {
+            final MockOutputMessage m = (MockOutputMessage) o.message;
             if (m == null)
                 fail("wtf!?");
             if ("output".equals(m.getType()))

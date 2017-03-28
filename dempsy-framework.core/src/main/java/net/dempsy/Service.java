@@ -6,6 +6,8 @@ public interface Service extends AutoCloseable {
 
     public void stop();
 
+    public boolean isReady();
+
     @Override
     public default void close() {
         stop();

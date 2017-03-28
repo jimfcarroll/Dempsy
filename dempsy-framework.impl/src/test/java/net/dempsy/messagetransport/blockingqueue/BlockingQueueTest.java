@@ -49,7 +49,8 @@ public class BlockingQueueTest {
         final ArrayBlockingQueue<Object> input = new ArrayBlockingQueue<>(16);
         try (final ThreadingModel tm = new DefaultThreadingModel();
                 final Receiver r = new BlockingQueueReceiver(input);
-                SenderFactory sf = new TransportManager().getAssociatedInstance(transportTypeId);
+                TransportManager tranMan = new TransportManager();
+                SenderFactory sf = tranMan.getAssociatedInstance(transportTypeId);
                 Sender sender = sf.getSender(r.getAddress())) {
             r.start((final String msg) -> {
                 message.set(new String(msg));
@@ -72,7 +73,8 @@ public class BlockingQueueTest {
         final ArrayBlockingQueue<Object> input = new ArrayBlockingQueue<>(1);
         try (final ThreadingModel tm = new DefaultThreadingModel();
                 final Receiver r = new BlockingQueueReceiver(input);
-                SenderFactory sf = new TransportManager().getAssociatedInstance(transportTypeId);
+                TransportManager tranMan = new TransportManager();
+                SenderFactory sf = tranMan.getAssociatedInstance(transportTypeId);
                 Sender sender = sf.getSender(r.getAddress())) {
 
             final AtomicBoolean finallySent = new AtomicBoolean(false);

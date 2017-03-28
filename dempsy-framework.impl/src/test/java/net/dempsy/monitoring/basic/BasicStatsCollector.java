@@ -99,7 +99,6 @@ public class BasicStatsCollector implements StatsCollector, MetricGetters {
     @Override
     public void messageDiscarded(final Object message) {
         messagesDiscarded.incrementAndGet();
-        inProcessMessages.decrementAndGet();
     }
 
     @Override
@@ -110,7 +109,7 @@ public class BasicStatsCollector implements StatsCollector, MetricGetters {
     @Override
     public void messageDispatched(final Object message) {
         messagesDispatched.incrementAndGet();
-        inProcessMessages.decrementAndGet();
+        inProcessMessages.incrementAndGet();
     }
 
     @Override

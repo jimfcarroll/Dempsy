@@ -28,6 +28,8 @@ public class SimpleInboundSide implements RoutingStrategy.Inbound {
     private String actualDir = null;
     private final AtomicBoolean isRunning = new AtomicBoolean(false);
 
+    private final AtomicBoolean isReady = new AtomicBoolean(false);
+
     @Override
     public void start(final Infrastructure infra) {
         this.session = infra.getCollaborator();
@@ -41,13 +43,16 @@ public class SimpleInboundSide implements RoutingStrategy.Inbound {
                     // check if we're still here.
                     if (actualDir != null) {
                         // is actualDir still there?
-                        if (session.exists(actualDir, null))
+                        if (session.exists(actualDir, null)) {
+                            isReady.set(true);
                             return true;
+                        }
                     }
                     session.recursiveMkdir(rootDir, DirMode.PERSISTENT);
                     actualDir = session.mkdir(rootDir + "/" + SIMPLE_SUBDIR, address, DirMode.EPHEMERAL_SEQUENTIAL);
                     session.exists(actualDir, this);
                     LOGGER.debug("Registed " + SimpleInboundSide.class.getSimpleName() + " at " + actualDir);
+                    isReady.set(true);
                     return true;
                 } catch (final ClusterInfoException e) {
                     final String message = "Failed to register " + SimpleInboundSide.class.getSimpleName() + " for cluster " + clusterId
@@ -73,6 +78,11 @@ public class SimpleInboundSide implements RoutingStrategy.Inbound {
     @Override
     public void stop() {
         isRunning.set(false);
+    }
+
+    @Override
+    public boolean isReady() {
+        return isReady.get();
     }
 
     @Override

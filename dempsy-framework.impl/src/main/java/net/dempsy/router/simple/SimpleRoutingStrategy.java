@@ -31,6 +31,7 @@ public class SimpleRoutingStrategy implements RoutingStrategy.Outbound {
 
     private ClusterId clusterId;
     private final AtomicReference<ContainerAddress> address = new AtomicReference<>();
+    private final AtomicBoolean isReady = new AtomicBoolean(false);
 
     @Override
     public void setClusterId(final ClusterId clusterId) {
@@ -78,12 +79,12 @@ public class SimpleRoutingStrategy implements RoutingStrategy.Outbound {
                         }
 
                         address.set(addr);
-
+                        isReady.set(true);
                         return true;
                     }
 
                 } catch (final ClusterInfoException e) {
-                    LOGGER.debug("Failed attempt to retreive node destination information");
+                    LOGGER.debug("Failed attempt to retreive node destination information:" + e.getLocalizedMessage());
                     return false;
                 }
             }
@@ -104,4 +105,8 @@ public class SimpleRoutingStrategy implements RoutingStrategy.Outbound {
         isRunning.set(false);
     }
 
+    @Override
+    public boolean isReady() {
+        return isReady.get();
+    }
 }

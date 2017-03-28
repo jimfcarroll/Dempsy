@@ -45,4 +45,9 @@ public class ServiceManager<T extends Service> extends Manager<T> implements Ser
         });
     }
 
+    @Override
+    public boolean isReady() {
+        return infra != null;
+    }
+
 }

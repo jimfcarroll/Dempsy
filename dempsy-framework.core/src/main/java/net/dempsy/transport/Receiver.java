@@ -20,7 +20,7 @@ import net.dempsy.threading.ThreadingModel;
 
 public interface Receiver extends AutoCloseable {
     /**
-     * What address can a Sender use to send messages to this receiver.
+     * What address can a Sender use to send messages to this receiver. This is called PRIOR to start
      */
     public NodeAddress getAddress();
 

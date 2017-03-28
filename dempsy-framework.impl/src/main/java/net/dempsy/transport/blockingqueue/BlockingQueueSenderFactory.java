@@ -56,4 +56,10 @@ public class BlockingQueueSenderFactory implements SenderFactory {
         this.blocking = blocking;
         return this;
     }
+
+    @Override
+    public boolean isReady() {
+        // we're always ready
+        return true;
+    }
 }

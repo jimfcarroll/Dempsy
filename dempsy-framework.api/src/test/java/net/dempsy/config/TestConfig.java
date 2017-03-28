@@ -99,7 +99,7 @@ public class TestConfig {
 
     @Test
     public void testSimpleConfig() throws Throwable {
-        final Node node = new Node("test").setDefaultRoutingStrategyId("");
+        final Node node = new Node("test").setDefaultRoutingStrategyId("").receiver(new Object());
         final Cluster cd = new Cluster("test-slot");
         cd.setMessageProcessor(new MessageProcessor<GoodTestMp>(new GoodTestMp()));
 
@@ -108,20 +108,20 @@ public class TestConfig {
         // if we get to here without an error we should be okay
         node.validate(); // this throws if there's a problem.
 
-        assertNull(node.getReceiver());
+        assertNotNull(node.getReceiver());
         assertNotNull(cd.getRoutingStrategyId());
         assertNull(node.getStatsCollector());
     }
 
     @Test
     public void testSimpleConfigBuilder() throws Throwable {
-        final Node node = new Node("test").setDefaultRoutingStrategyId("");
+        final Node node = new Node("test").setDefaultRoutingStrategyId("").receiver(new Object());
         final Cluster cd = node.cluster("test-slot").mp(new MessageProcessor<GoodTestMp>(new GoodTestMp()));
 
         // if we get to here without an error we should be okay
         node.validate(); // this throws if there's a problem.
 
-        assertNull(node.getReceiver());
+        assertNotNull(node.getReceiver());
         assertNotNull(cd.getRoutingStrategyId());
         assertNull(node.getStatsCollector());
     }
@@ -298,7 +298,7 @@ public class TestConfig {
 
     @Test
     public void testSimpleConfigWithKeyStore() throws Throwable {
-        final Node app = new Node("test").defaultRoutingStrategyId("");
+        final Node app = new Node("test").defaultRoutingStrategyId("").receiver(new Object());
         final Cluster cd = new Cluster("test-slot");
         cd.setMessageProcessor(new MessageProcessor<GoodTestMp>(new GoodTestMp()));
         cd.setKeySource(new KeySource<Object>() {
@@ -313,7 +313,7 @@ public class TestConfig {
 
     @Test
     public void testSimpleConfigWithKeyStoreBuilder() throws Throwable {
-        final Node node = new Node("test").defaultRoutingStrategyId("");
+        final Node node = new Node("test").defaultRoutingStrategyId("").receiver(new Object());
         node.cluster("test-slot").mp(new MessageProcessor<GoodTestMp>(new GoodTestMp()))
                 .keySource(new KeySource<Object>() {
                     @Override
@@ -370,7 +370,7 @@ public class TestConfig {
 
     @Test
     public void testConfigMpWithGoodMPEvict() throws Throwable {
-        final Node app = new Node("test").defaultRoutingStrategyId("");
+        final Node app = new Node("test").defaultRoutingStrategyId("").receiver(new Object());
         final Cluster cd = new Cluster("test-slot");
 
         @Mp
@@ -419,7 +419,7 @@ public class TestConfig {
             }
         }
 
-        final Node node = new Node("test").setDefaultRoutingStrategyId("");
+        final Node node = new Node("test").setDefaultRoutingStrategyId("").setReceiver(new Object());
         node.cluster("slot").mp(new MessageProcessor<mp>(new mp()));
         node.validate();
     }

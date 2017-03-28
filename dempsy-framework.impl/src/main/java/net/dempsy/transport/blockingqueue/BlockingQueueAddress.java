@@ -21,6 +21,7 @@ import java.util.concurrent.BlockingQueue;
 import net.dempsy.transport.NodeAddress;
 
 public class BlockingQueueAddress implements NodeAddress {
+    private static final long serialVersionUID = 1L;
 
     protected final BlockingQueue<Object> queue;
     protected final String guid;

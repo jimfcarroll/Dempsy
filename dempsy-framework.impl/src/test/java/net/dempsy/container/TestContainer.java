@@ -46,6 +46,7 @@ import net.dempsy.config.ClusterId;
 import net.dempsy.config.Node;
 import net.dempsy.container.mocks.ContainerTestMessage;
 import net.dempsy.container.mocks.OutputMessage;
+import net.dempsy.container.nonlocking.NonLockingContainer;
 import net.dempsy.lifecycle.annotation.Activation;
 import net.dempsy.lifecycle.annotation.Evictable;
 import net.dempsy.lifecycle.annotation.MessageHandler;
@@ -59,6 +60,7 @@ import net.dempsy.lifecycle.annotation.Start;
 import net.dempsy.lifecycle.annotation.utils.KeyExtractor;
 import net.dempsy.messages.Adaptor;
 import net.dempsy.messages.Dispatcher;
+import net.dempsy.monitoring.StatsCollector;
 import net.dempsy.transport.blockingqueue.BlockingQueueReceiver;
 
 //
@@ -76,6 +78,7 @@ public class TestContainer {
     private ClassPathXmlApplicationContext context;
     private NodeManager manager;
     private LocalClusterSessionFactory sessionFactory;
+    private StatsCollector statsCollector;
 
     private final List<AutoCloseable> toClose = new ArrayList<>();
 
@@ -88,8 +91,12 @@ public class TestContainer {
     public void setUp() throws Exception {
         context = track(new ClassPathXmlApplicationContext("classpath:/spring/container/test-container.xml"));
         sessionFactory = new LocalClusterSessionFactory();
-        manager = track(new NodeManager()).node(context.getBean(Node.class)).collaborator(track(sessionFactory.createSession())).start();
+        final Node node = context.getBean(Node.class);
+        manager = track(new NodeManager()).node(node).collaborator(track(sessionFactory.createSession())).start();
+        statsCollector = (StatsCollector) node.getStatsCollector();
         container = manager.getContainers().get(0);
+
+        assertTrue(poll(manager, m -> m.isReady()));
     }
 
     @After
@@ -416,7 +423,7 @@ public class TestContainer {
         final int numInstances = 20;
         final int concurrency = 5;
 
-        container.setConcurrency(concurrency);
+        ((NonLockingContainer) container).setConcurrency(concurrency);
 
         final TestAdaptor adaptor = context.getBean(TestAdaptor.class);
         assertNotNull(adaptor.dispatcher);
@@ -546,7 +553,7 @@ public class TestContainer {
         Thread.sleep(500); // let it get going.
         assertFalse(evictIsComplete.get()); // check to see we're hung.
 
-        final MetricGetters sc = (MetricGetters) container.getStatsCollector();
+        final MetricGetters sc = (MetricGetters) statsCollector;
         assertEquals(0, sc.getMessageCollisionCount());
 
         // sending it a message will now cause it to have the collision tick up

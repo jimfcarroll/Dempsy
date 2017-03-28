@@ -38,4 +38,10 @@ public class SimpleRoutingStrategyFactory implements RoutingStrategy.Factory {
         return ret;
     }
 
+    @Override
+    public boolean isReady() {
+        // we're always ready
+        return true;
+    }
+
 }

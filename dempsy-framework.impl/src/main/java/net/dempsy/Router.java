@@ -42,6 +42,7 @@ public class Router extends Dispatcher implements Service {
     private final NodeAddress thisNode;
     private final TransportManager tmanager;
     private final NodeReceiver nodeReciever;
+    private final AtomicBoolean isReady = new AtomicBoolean(false);
 
     private static class ApplicationState {
         public final Map<String, Outbound> outboundByClusterName = new HashMap<>();
@@ -204,6 +205,7 @@ public class Router extends Dispatcher implements Service {
 
                         outbounds.set(newOutbounds);
                     }
+                    isReady.set(true);
                     return true;
                 } catch (final ClusterInfoException e) {
                     final String message = "Failed to find outgoing route information. Will retry shortly.";
@@ -222,6 +224,25 @@ public class Router extends Dispatcher implements Service {
 
         isRunning.set(true);
         checkup.process();
+    }
+
+    @Override
+    public boolean isReady() {
+        if (isReady.get()) {
+            final ApplicationState obs = outbounds.get();
+            if (obs == null)
+                return false;
+            for (final Outbound ob : obs.outboundByClusterName.values()) {
+                if (!ob.isReady())
+                    return false;
+            }
+
+            for (final SenderFactory sf : obs.senderByNode.values()) {
+                if (!sf.isReady())
+                    return false;
+            }
+            return true;
+        } else return false;
     }
 
     @Override

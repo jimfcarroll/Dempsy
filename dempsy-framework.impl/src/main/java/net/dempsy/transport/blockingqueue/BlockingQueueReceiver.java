@@ -118,6 +118,7 @@ public class BlockingQueueReceiver implements Runnable, Receiver {
      * @param listener
      *            is the MessageTransportListener to push messages to when they come in.
      */
+    @SuppressWarnings({ "rawtypes", "unchecked" })
     @Override
     public synchronized void start(final Listener listener, final ThreadingModel threadingModel) {
         if (listener == null)

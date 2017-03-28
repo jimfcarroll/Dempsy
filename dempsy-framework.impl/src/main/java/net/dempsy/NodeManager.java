@@ -19,6 +19,7 @@ import net.dempsy.config.Cluster;
 import net.dempsy.config.ClusterId;
 import net.dempsy.config.Node;
 import net.dempsy.container.Container;
+import net.dempsy.container.nonlocking.NonLockingContainer;
 import net.dempsy.messages.Adaptor;
 import net.dempsy.monitoring.DummyStatsCollector;
 import net.dempsy.monitoring.StatsCollector;
@@ -45,7 +46,9 @@ public class NodeManager implements Infrastructure, AutoCloseable {
 
     private final AtomicBoolean isRunning = new AtomicBoolean(false);
 
-    private final ThreadingModel threading = new DefaultThreadingModel().setCoresFactor(1.0).setAdditionalThreads(1)
+    private final ServiceTracker tr = new ServiceTracker();
+
+    private final ThreadingModel threading = tr.track(new DefaultThreadingModel()).setCoresFactor(1.0).setAdditionalThreads(1)
             .setMaxNumberOfQueuedLimitedTasks(10000).start();
 
     // created in start(). Stopped in stop()
@@ -58,6 +61,8 @@ public class NodeManager implements Infrastructure, AutoCloseable {
     private StatsCollector statsCollector;
     private RoutingStrategyManager rsManager = null;
     private TransportManager tManager = null;
+
+    AtomicBoolean ptaskReady = new AtomicBoolean(false);
 
     public NodeManager node(final Node node) {
         this.node = node;
@@ -89,8 +94,8 @@ public class NodeManager implements Infrastructure, AutoCloseable {
                 final Adaptor adaptor = c.getAdaptor();
                 adaptors.add(adaptor);
             } else {
-                final Container con = new Container(c.getMessageProcessor(), c.getClusterId());
-                con.setStatCollector(statsCollector);
+                @SuppressWarnings("resource")
+                final Container con = new NonLockingContainer().setMessageProcessor(c.getMessageProcessor()).setClusterId(c.getClusterId());
 
                 // TODO: This is a hack for now.
                 final Manager<RoutingStrategy.Inbound> inboundManager = new Manager<RoutingStrategy.Inbound>(RoutingStrategy.Inbound.class);
@@ -107,9 +112,9 @@ public class NodeManager implements Infrastructure, AutoCloseable {
         receiver = (Receiver) node.getReceiver();
         final NodeAddress nodeAddress = receiver.getAddress();
 
-        final NodeReceiver nodeReciever = new NodeReceiver(containers.stream().map(pc -> pc.container).collect(Collectors.toList()), threading,
-                statsCollector);
-        receiver.start(nodeReciever, threading);
+        final NodeReceiver nodeReciever = tr
+                .track(new NodeReceiver(containers.stream().map(pc -> pc.container).collect(Collectors.toList()), threading,
+                        statsCollector));
 
         final String nodeId = nodeAddress.getGuid();
         final Map<ClusterId, ClusterInformation> messageTypesByClusterId = new HashMap<>();
@@ -132,7 +137,10 @@ public class NodeManager implements Infrastructure, AutoCloseable {
 
                     session.mkdir(nodePath, nodeInfo, DirMode.EPHEMERAL);
                     final NodeInformation reread = (NodeInformation) session.getData(nodePath, this);
-                    return nodeInfo.equals(reread);
+                    final boolean ret = nodeInfo.equals(reread);
+                    if (ret == true)
+                        ptaskReady.set(true);
+                    return ret;
                 } catch (final ClusterInfoException e) {
                     final String logmessage = "Failed to register the node. Retrying in " + RETRY_PERIOND_MILLIS + " milliseconds.";
                     if (LOGGER.isDebugEnabled())
@@ -149,57 +157,52 @@ public class NodeManager implements Infrastructure, AutoCloseable {
             }
         };
 
+        // The layering works this way.
+        //
+        // Receiver -> NodeReceiver -> adaptor -> container -> Router -> RoutingStrategyOB -> Transport
+        //
+        // starting needs to happen in reverse.
         isRunning.set(true);
         keepNodeRegstered.process();
 
-        // Also start the inbound side routing strategies
-        IntStream.range(0, containers.size()).forEach(i -> {
-            final PerContainer c = containers.get(i);
-            c.inboundStrategy.setContainerDetails(c.container.getClusterId(), new ContainerAddress(nodeAddress, i));
-            c.inboundStrategy.start(this);
-        });
+        this.tManager = tr.start(new TransportManager(), this);
+        this.rsManager = tr.start(new RoutingStrategyManager(), this);
+        this.router = tr.start(new Router(rsManager, nodeAddress, nodeReciever, tManager), this);
 
-        this.rsManager = new RoutingStrategyManager();
-        rsManager.start(this);
-        this.tManager = new TransportManager();
-        tManager.start(this);
-        this.router = new Router(rsManager, nodeAddress, nodeReciever, tManager);
-        this.router.start(this);
+        // set up containers
+        containers.forEach(pc -> pc.container.setDispatcher(router));
+
+        // start containers
+        containers.forEach(pc -> tr.start(pc.container, this));
+
+        // set up adaptors
         adaptors.forEach(a -> a.setDispatcher(router));
 
-        containers.forEach(pc -> pc.container.setDispatcher(router));
+        // start adaptors
+        adaptors.forEach(a -> tr.track(a).start());
+
+        // IB routing strategy
+        IntStream.range(0, containers.size()).forEach(i -> {
+            final PerContainer c = containers.get(i);
+            c.inboundStrategy.setContainerDetails(c.clusterDefinition.getClusterId(), new ContainerAddress(nodeAddress, i));
+            tr.start(c.inboundStrategy, this);
+        });
+
+        tr.track(receiver).start(nodeReciever, threading);
+
         // =====================================
 
         return this;
     }
 
-    private static void stopMe(final AutoCloseable ac) {
-        try {
-            if (ac != null)
-                ac.close();
-        } catch (final Exception e) {
-            LOGGER.warn("Couldn't close " + ac.getClass().getSimpleName(), e);
-        }
-    }
-
-    private static void stopMe(final Service ac) {
-        try {
-            if (ac != null)
-                ac.stop();
-        } catch (final Exception e) {
-            LOGGER.warn("Couldn't close " + ac.getClass().getSimpleName(), e);
-        }
-    }
-
     public void stop() {
         isRunning.set(false);
-        stopMe(receiver);
 
-        containers.stream().map(pc -> pc.inboundStrategy).forEach(NodeManager::stopMe);
+        tr.stopAll();
+    }
 
-        stopMe(router);
-        stopMe(tManager);
-        stopMe(rsManager);
+    public boolean isReady() {
+        return ptaskReady.get() && tr.allReady();
     }
 
     @Override
@@ -243,6 +246,11 @@ public class NodeManager implements Infrastructure, AutoCloseable {
         return rootPaths;
     }
 
+    @Override
+    public StatsCollector getStatsCollector() {
+        return statsCollector;
+    }
+
     // Testing accessors
 
     /**
@@ -275,5 +283,4 @@ public class NodeManager implements Infrastructure, AutoCloseable {
     private static String clusters(final String application) {
         return root(application) + "/clusters";
     }
-
 }

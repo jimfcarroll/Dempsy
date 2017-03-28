@@ -19,6 +19,8 @@ import net.dempsy.cluster.ClusterInfoSession;
 import net.dempsy.cluster.local.LocalClusterSessionFactory;
 import net.dempsy.config.ClusterId;
 import net.dempsy.messages.KeyedMessageWithType;
+import net.dempsy.monitoring.StatsCollector;
+import net.dempsy.monitoring.basic.BasicStatsCollector;
 import net.dempsy.router.RoutingStrategy;
 import net.dempsy.router.RoutingStrategy.ContainerAddress;
 import net.dempsy.router.RoutingStrategyManager;
@@ -47,6 +49,11 @@ public class TestSimpleRoutingStrategy {
             @Override
             public RootPaths getRootPaths() {
                 return new RootPaths("/application", "/application/nodes", "/application/clusters");
+            }
+
+            @Override
+            public StatsCollector getStatsCollector() {
+                return new BasicStatsCollector();
             }
         };
     }
@@ -122,10 +129,10 @@ public class TestSimpleRoutingStrategy {
 
             assertTrue(waitForReg(session));
 
-            final RoutingStrategyManager obman = new RoutingStrategyManager();
-            try (final RoutingStrategy.Outbound ob = obman.getAssociatedInstance(SimpleRoutingStrategy.class.getPackage().getName());) {
+            try (final RoutingStrategyManager obman = new RoutingStrategyManager();
+                    final RoutingStrategy.Factory obf = obman.getAssociatedInstance(SimpleRoutingStrategy.class.getPackage().getName());
+                    RoutingStrategy.Outbound ob = obf.getStrategy(cid)) {
 
-                ob.setClusterId(cid);
                 try (final ClusterInfoSession ses2 = sessFact.createSession()) {
                     ob.start(makeInfra(ses2, sched));
 

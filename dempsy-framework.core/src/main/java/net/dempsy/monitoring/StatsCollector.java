@@ -35,7 +35,15 @@ public interface StatsCollector extends AutoCloseable {
     void messageReceived(Object message);
 
     /**
-     * MPContainer calls this method when before invoking an MP's <code>MessageHandler</code> or Output method.
+     * MPContainer calls this method when before invoking an MP's <code>MessageHandler</code>
+     * or Output method.
+     * 
+     * A message processing "transaction" opens with a messageDispatched. It
+     * the closes with one of the following:
+     * <ul>
+     * <li>messageProcessed - successfully handled</li>
+     * <li>messageFailed - there was an error</li>
+     * </ul>
      */
     void messageDispatched(Object message);
 
