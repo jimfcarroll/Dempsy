@@ -107,7 +107,7 @@ public class NonLockingContainer extends Container {
             evictionScheduler.shutdownNow();
 
         // the following will close up any output executor that might be running
-        setConcurrency(-1);
+        setOutputCycleConcurrency(-1);
     }
 
     @Override
@@ -306,6 +306,7 @@ public class NonLockingContainer extends Container {
                     if (LOGGER.isTraceEnabled())
                         LOGGER.trace("the container for " + clusterId + " failed to obtain lock on " + SafeString.valueOf(prototype));
                     statCollector.messageCollision(message);
+                    statCollector.messageDiscarded(message);
                     keepTrying = false;
                 } else {
                     // try and get the queue.
@@ -417,7 +418,8 @@ public class NonLockingContainer extends Container {
     private int outputConcurrency = -1;
     private final Object lockForExecutorServiceSetter = new Object();
 
-    public void setConcurrency(final int concurrency) {
+    @Override
+    public void setOutputCycleConcurrency(final int concurrency) {
         synchronized (lockForExecutorServiceSetter) {
             outputConcurrency = concurrency;
             if (prototype != null) // otherwise this isn't initialized yet

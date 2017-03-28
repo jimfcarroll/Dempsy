@@ -19,7 +19,6 @@ import net.dempsy.config.Cluster;
 import net.dempsy.config.ClusterId;
 import net.dempsy.config.Node;
 import net.dempsy.container.Container;
-import net.dempsy.container.nonlocking.NonLockingContainer;
 import net.dempsy.messages.Adaptor;
 import net.dempsy.monitoring.DummyStatsCollector;
 import net.dempsy.monitoring.StatsCollector;
@@ -80,6 +79,10 @@ public class NodeManager implements Infrastructure, AutoCloseable {
         return this;
     }
 
+    private static Container makeContainer(final String containerTypeId) {
+        return new Manager<Container>(Container.class).getAssociatedInstance(containerTypeId);
+    }
+
     public NodeManager start() throws DempsyException {
         validate();
 
@@ -94,8 +97,8 @@ public class NodeManager implements Infrastructure, AutoCloseable {
                 final Adaptor adaptor = c.getAdaptor();
                 adaptors.add(adaptor);
             } else {
-                @SuppressWarnings("resource")
-                final Container con = new NonLockingContainer().setMessageProcessor(c.getMessageProcessor()).setClusterId(c.getClusterId());
+                final Container con = makeContainer(node.getContainerTypeId()).setMessageProcessor(c.getMessageProcessor())
+                        .setClusterId(c.getClusterId());
 
                 // TODO: This is a hack for now.
                 final Manager<RoutingStrategy.Inbound> inboundManager = new Manager<RoutingStrategy.Inbound>(RoutingStrategy.Inbound.class);

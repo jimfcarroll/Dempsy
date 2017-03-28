@@ -25,6 +25,8 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -38,12 +40,16 @@ import java.util.concurrent.atomic.AtomicLong;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
+import org.junit.runners.Parameterized.Parameters;
 import org.springframework.context.support.ClassPathXmlApplicationContext;
 
 import net.dempsy.NodeManager;
 import net.dempsy.cluster.local.LocalClusterSessionFactory;
 import net.dempsy.config.ClusterId;
 import net.dempsy.config.Node;
+import net.dempsy.container.locking.LockingContainer;
 import net.dempsy.container.mocks.ContainerTestMessage;
 import net.dempsy.container.mocks.OutputMessage;
 import net.dempsy.container.nonlocking.NonLockingContainer;
@@ -62,25 +68,45 @@ import net.dempsy.messages.Adaptor;
 import net.dempsy.messages.Dispatcher;
 import net.dempsy.monitoring.StatsCollector;
 import net.dempsy.transport.blockingqueue.BlockingQueueReceiver;
+import net.dempsy.utils.test.SystemPropertyManager;
 
 //
 // NOTE: this test simply puts messages on an input queue, and expects
 //       messages on an output queue; the important part is the wiring
 //       in TestMPContainer.xml
 //
+@RunWith(Parameterized.class)
 public class TestContainer {
-    // ----------------------------------------------------------------------------
-    // Configuration
-    // ----------------------------------------------------------------------------
+    public static String[] ctx = {
+            "classpath:/spring/container/test-container.xml",
+            "classpath:/spring/container/test-mp.xml",
+            "classpath:/spring/container/test-adaptor.xml"
+    };
+
+    @Parameters
+    public static Collection<Object[]> data() {
+        return Arrays.asList(new Object[][] {
+                { NonLockingContainer.class.getPackage().getName() },
+                { LockingContainer.class.getPackage().getName() }
+        });
+    }
 
     private Container container = null;
 
-    private ClassPathXmlApplicationContext context;
+    private ClassPathXmlApplicationContext context = null;
     private NodeManager manager;
-    private LocalClusterSessionFactory sessionFactory;
+    private LocalClusterSessionFactory sessionFactory = null;
     private StatsCollector statsCollector;
 
     private final List<AutoCloseable> toClose = new ArrayList<>();
+    private final String containerId;
+
+    public static Map<String, TestProcessor> cache = null;
+    public static List<OutputMessage> outputMessages = null;
+
+    public TestContainer(final String containerId) {
+        this.containerId = containerId;
+    }
 
     private <T extends AutoCloseable> T track(final T o) {
         toClose.add(o);
@@ -89,29 +115,26 @@ public class TestContainer {
 
     @Before
     public void setUp() throws Exception {
-        context = track(new ClassPathXmlApplicationContext("classpath:/spring/container/test-container.xml"));
+        track(new SystemPropertyManager()).set("container-type", containerId);
+        context = track(new ClassPathXmlApplicationContext(ctx));
         sessionFactory = new LocalClusterSessionFactory();
         final Node node = context.getBean(Node.class);
         manager = track(new NodeManager()).node(node).collaborator(track(sessionFactory.createSession())).start();
         statsCollector = (StatsCollector) node.getStatsCollector();
         container = manager.getContainers().get(0);
-
         assertTrue(poll(manager, m -> m.isReady()));
     }
 
     @After
     public void tearDown() throws Exception {
-        context = null;
         cache = null;
+        outputMessages = null;
         recheck(() -> toClose.forEach(v -> uncheck(() -> v.close())), Exception.class);
         LocalClusterSessionFactory.completeReset();
-        sessionFactory = null;
-        outputMessages = null;
     }
 
     @MessageType
     public static class MyMessage {
-
         @Override
         public String toString() {
             return "MyMessage [value=" + value + "]";
@@ -174,9 +197,6 @@ public class TestContainer {
     // ----------------------------------------------------------------------------
     // Message and MP classes
     // ----------------------------------------------------------------------------
-
-    public static Map<String, TestProcessor> cache = null;
-    public static List<OutputMessage> outputMessages = null;
 
     @Mp
     public static class TestProcessor implements Cloneable {
@@ -423,7 +443,7 @@ public class TestContainer {
         final int numInstances = 20;
         final int concurrency = 5;
 
-        ((NonLockingContainer) container).setConcurrency(concurrency);
+        container.setOutputCycleConcurrency(concurrency);
 
         final TestAdaptor adaptor = context.getBean(TestAdaptor.class);
         assertNotNull(adaptor.dispatcher);

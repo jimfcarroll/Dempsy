@@ -22,6 +22,8 @@ import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
@@ -30,16 +32,21 @@ import java.util.concurrent.TimeUnit;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
+import org.junit.runners.Parameterized.Parameters;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import net.dempsy.Infrastructure;
+import net.dempsy.Manager;
 import net.dempsy.ServiceTracker;
 import net.dempsy.cluster.ClusterInfoSession;
 import net.dempsy.config.ClusterId;
 import net.dempsy.container.locking.LockingContainer;
 import net.dempsy.container.mocks.MockInputMessage;
 import net.dempsy.container.mocks.MockOutputMessage;
+import net.dempsy.container.nonlocking.NonLockingContainer;
 import net.dempsy.lifecycle.annotation.MessageHandler;
 import net.dempsy.lifecycle.annotation.MessageProcessor;
 import net.dempsy.lifecycle.annotation.Mp;
@@ -55,10 +62,25 @@ import net.dempsy.util.executor.AutoDisposeSingleThreadScheduler;
 /**
  * Test load handling / sheding in the MP container. This is probably involved enough to merit not mixing into the existing MPContainer test cases.
  */
+@RunWith(Parameterized.class)
 public class TestContainerLoadHandling {
     private void checkStat(final MetricGetters stat) {
         assertEquals(stat.getDispatchedMessageCount(),
                 stat.getMessageFailedCount() + stat.getProcessedMessageCount() + stat.getInFlightMessageCount());
+    }
+
+    @Parameters
+    public static Collection<Object[]> data() {
+        return Arrays.asList(new Object[][] {
+                { NonLockingContainer.class.getPackage().getName() },
+                { LockingContainer.class.getPackage().getName() }
+        });
+    }
+
+    private final String containerId;
+
+    public TestContainerLoadHandling(final String containerId) {
+        this.containerId = containerId;
     }
 
     private static int NTHREADS = 2;
@@ -85,7 +107,7 @@ public class TestContainerLoadHandling {
         final BasicStatsCollector sc = new BasicStatsCollector();
         stats = sc;
 
-        container = tr.track(new LockingContainer())
+        container = tr.track(new Manager<Container>(Container.class).getAssociatedInstance(containerId))
                 .setMessageProcessor(new MessageProcessor<TestMessageProcessor>(new TestMessageProcessor()))
                 .setClusterId(cid);
         container.setDispatcher(dispatcher);
@@ -308,7 +330,6 @@ public class TestContainerLoadHandling {
 
     @Test
     public void testExcessLoadIsDiscarded() throws Exception {
-
         startLatch = new CountDownLatch(1);
         finishLatch = new CountDownLatch(3 * NTHREADS);
         imIn = new CountDownLatch(3 * NTHREADS);
@@ -324,8 +345,8 @@ public class TestContainerLoadHandling {
             assertEquals(0, stats.getDiscardedMessageCount());
         }
 
-        // Add another message. Since processing is wating on the start latch,
-        /// it shoulld be discarded
+        // Add another message. Since processing is waiting on the start latch,
+        /// it should be discarded
         assertTrue(imIn.await(2, TimeUnit.SECONDS)); // this means they're all in
         // need to directly dispatch it to avoid a race condition
         container.dispatch(km(new MockInputMessage("key" + 0)), false);

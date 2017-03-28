@@ -1,13 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:context="http://www.springframework.org/schema/context"
+    xsi:schemaLocation="http://www.springframework.org/schema/beans
+    http://www.springframework.org/schema/beans/spring-beans.xsd 
+    http://www.springframework.org/schema/context
+    http://www.springframework.org/schema/context/spring-context.xsd ">
 
-<beans xmlns="http://www.springframework.org/schema/beans"
-       xmlns:util="http://www.springframework.org/schema/util"
-       xmlns:context="http://www.springframework.org/schema/context"
-       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-       xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd
-                           http://www.springframework.org/schema/util http://www.springframework.org/schema/util/spring-util-2.5.xsd
-                           http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context-2.5.xsd">
-
+ <context:property-placeholder system-properties-mode="OVERRIDE"/>
+ 
    <bean name="statsCollector" class="net.dempsy.monitoring.basic.BasicStatsCollector" />
    
    <!-- input: test adds messages directly to queue, they get delivered to container -->
@@ -15,36 +14,16 @@
       <constructor-arg value="16" />
    </bean>
    
-   <bean class="net.dempsy.config.Node" >
+   <bean class="net.dempsy.config.Node" autowire="byType" >
      <constructor-arg value="test-app" />
      <property name="statsCollector" ref="statsCollector" />
      <property name="defaultRoutingStrategyId" value="net.dempsy.router.simple" />
      <property name="receiver" ref="inputTransport" />
-     <property name="clusters">
-        <list>
-          <bean class="net.dempsy.config.Cluster">
-            <constructor-arg value="test-cluster" />
-            <property name="messageProcessor" >
-              <bean class="net.dempsy.lifecycle.annotation.MessageProcessor" >
-                <constructor-arg ref="testMp" />
-              </bean>
-            </property>
-          </bean>
-          <bean class="net.dempsy.config.Cluster">
-            <constructor-arg value="test-adaptor" />
-            <property name="adaptor" ref="adaptor" />
-          </bean>
-        </list>
-     </property>
+     <property name="containerTypeId" value="${container-type}" />
    </bean>
 
    <bean id="inputTransport" class="net.dempsy.transport.blockingqueue.BlockingQueueReceiver">
       <constructor-arg ref="inputQueue" />
    </bean>
 
-   <!-- in a real app, these would be inner beans; for testing, we want to access them -->
-   <bean id="testMp" class="net.dempsy.container.TestContainer$TestProcessor" />
-   
-   <bean id="adaptor" class="net.dempsy.container.TestContainer$TestAdaptor" />
-   
 </beans>

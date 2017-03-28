@@ -108,6 +108,8 @@ public abstract class Container implements Service {
     // This method MUST NOT THROW
     public abstract void outputPass();
 
+    public abstract void setOutputCycleConcurrency(final int concurrency);
+
     // ----------------------------------------------------------------------------
     // Internals
     // ----------------------------------------------------------------------------

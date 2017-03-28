@@ -16,16 +16,12 @@ public class Node {
     private static final String DEFAULT_APP = "default";
 
     public final String application;
-
     private final List<Cluster> clusters = new ArrayList<>();
-
     private Object statsCollector = null;
-
     private String defaultRoutingStrategyId = null;
-
     private Object receiver = null;
-
     private boolean configed = false;
+    private String containerTypeId = "net.dempsy.container.nonlocking";
 
     public Node(final String applicationName) {
         if (applicationName == null)
@@ -69,6 +65,12 @@ public class Node {
         this.receiver = receiver;
         return this;
     }
+
+    public Node containerTypeId(final String containerTypeId) {
+        this.containerTypeId = containerTypeId;
+        return this;
+    }
+
     // =======================================================================
 
     public Node setClusters(final Cluster... defs) {
@@ -125,13 +127,21 @@ public class Node {
         return statsCollector;
     }
 
+    public Node setReceiver(final Object receiver) {
+        this.receiver = receiver;
+        return this;
+    }
+
     public Object getReceiver() {
         return receiver;
     }
 
-    public Node setReceiver(final Object receiver) {
-        this.receiver = receiver;
-        return this;
+    public Node setContainerTypeId(final String containerTypeId) {
+        return containerTypeId(containerTypeId);
+    }
+
+    public String getContainerTypeId() {
+        return containerTypeId;
     }
 
     public void validate() throws IllegalStateException {

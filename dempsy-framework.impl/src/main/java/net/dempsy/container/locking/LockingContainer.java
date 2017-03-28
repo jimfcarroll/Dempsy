@@ -97,7 +97,7 @@ public class LockingContainer extends Container {
             evictionScheduler.shutdownNow();
 
         // the following will close up any output executor that might be running
-        setConcurrency(-1);
+        setOutputCycleConcurrency(-1);
     }
 
     @Override
@@ -427,7 +427,8 @@ public class LockingContainer extends Container {
     private int outputConcurrency = -1;
     private final Object lockForExecutorServiceSetter = new Object();
 
-    public void setConcurrency(final int concurrency) {
+    @Override
+    public void setOutputCycleConcurrency(final int concurrency) {
         synchronized (lockForExecutorServiceSetter) {
             outputConcurrency = concurrency;
             if (prototype != null) // otherwise this isn't initialized yet
