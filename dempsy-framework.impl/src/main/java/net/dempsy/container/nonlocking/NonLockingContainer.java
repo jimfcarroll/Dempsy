@@ -18,11 +18,11 @@ package net.dempsy.container.nonlocking;
 
 import static net.dempsy.util.SafeString.objectDescription;
 
-import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
@@ -33,8 +33,11 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -61,10 +64,18 @@ public class NonLockingContainer extends Container {
     private final Logger LOGGER = LoggerFactory.getLogger(getClass());
     private StatsCollector statCollector;
 
+    // private static final int NUM_SHARDS = 1024;
+    //
+    // private static class Contents {
+    // Map<Object, WorkingPlaceholder> working = new ConcurrentHashMap<>();
+    // }
+    // @SuppressWarnings("unchecked")
+    // AtomicReference<Contents>[] shardedContents = new AtomicReference[NUM_SHARDS];
+
     // message key -> instance that handles messages with this key
     // changes to this map will be synchronized; read-only may be concurrent
-    private final ConcurrentHashMap<Object, WorkingPlaceholder> working = new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<Object, Object> instances = new ConcurrentHashMap<>();
+    private final Map<Object, WorkingPlaceholder> working = new ConcurrentHashMap<>();
+    private final Map<Object, Object> instances = new ConcurrentHashMap<>();
 
     // Scheduler to handle eviction thread.
     private ScheduledExecutorService evictionScheduler;
@@ -73,10 +84,31 @@ public class NonLockingContainer extends Container {
     private Set<String> messageTypes;
 
     private final AtomicBoolean isReady = new AtomicBoolean(false);
-    private final AtomicLong numBeingWorked = new AtomicLong(0L);
+    private final AtomicInteger numBeingWorked = new AtomicInteger(0);
+
+    private static class CountedLinkedList<T> {
+        private final LinkedList<T> list = new LinkedList<>();
+        private int size = 0;
+
+        public void forEach(final Consumer<T> c) {
+            list.forEach(c);
+        }
+
+        public T removeFirst() {
+            size--;
+            return list.removeFirst();
+        }
+
+        public boolean add(final T v) {
+            final boolean ret = list.add(v);
+            if (ret)
+                size++;
+            return ret;
+        }
+    }
 
     private static class WorkingQueueHolder {
-        List<KeyedMessage> queue = null;
+        CountedLinkedList<KeyedMessage> queue = null;
     }
 
     protected static class WorkingPlaceholder {
@@ -150,6 +182,11 @@ public class NonLockingContainer extends Container {
         return instances.size();
     }
 
+    @Override
+    public int getMessageWorkingCount() {
+        return numBeingWorked.get();
+    }
+
     // ----------------------------------------------------------------------------
     // Test Hooks
     // ----------------------------------------------------------------------------
@@ -218,34 +255,33 @@ public class NonLockingContainer extends Container {
         return instance;
     }
 
-    private WorkingQueueHolder getQueue(final WorkingPlaceholder wp) {
-        // Spin on the queue
-        WorkingQueueHolder mailbox = null;
-        for (boolean mine = false; !mine;) {
-            mailbox = wp.mailbox.getAndSet(null);
+    private static final int SPIN_TRIES = 100;
 
-            if (mailbox == null)
-                Thread.yield();
-            else
-                mine = true;
-        }
-
-        return mailbox;
+    private <T> T waitFor(final Supplier<T> condition) {
+        int counter = SPIN_TRIES;
+        do {
+            final T ret = condition.get();
+            if (ret != null)
+                return ret;
+            if (counter > 0)
+                counter--;
+            else Thread.yield();
+        } while (true);
     }
 
-    private void drainPendingMessages(final WorkingPlaceholder wp, final boolean mpFailure) {
-        final WorkingQueueHolder mailbox = getQueue(wp);
-        if (mailbox.queue != null) {
-            mailbox.queue.forEach(m -> {
-                LOGGER.debug("Failed to process message with key " + SafeString.objectDescription(m.key));
-                statCollector.messageFailed(mpFailure);
-            });
-        }
+    private WorkingQueueHolder getQueue(final WorkingPlaceholder wp) {
+        return waitFor(() -> wp.mailbox.getAndSet(null));
+    }
+
+    private static <T> T putIfAbsent(final Map<Object, T> map, final Object key, final T value) {
+        final T ret = map.get(key);
+        if (ret == null)
+            return map.putIfAbsent(key, value);
+        return ret;
     }
 
     @Override
     public void dispatch(final KeyedMessage message, final boolean block) throws IllegalArgumentException, ContainerException {
-        statCollector.messageReceived(message);
         if (message == null)
             return; // No. We didn't process the null message
 
@@ -260,42 +296,62 @@ public class NonLockingContainer extends Container {
         boolean keepTrying = true;
         while (keepTrying) {
             final WorkingPlaceholder wp = new WorkingPlaceholder();
-            final WorkingPlaceholder alreadyThere = working.putIfAbsent(key, wp);
+            final WorkingPlaceholder alreadyThere = putIfAbsent(working, key, wp);
 
             if (alreadyThere == null) { // we're it!
                 keepTrying = false; // we're not going to keep trying.
                 try { // if we don't get the WorkingPlaceholder out of the working map then that Mp will forever be lost.
-                    numBeingWorked.incrementAndGet();
+                    numBeingWorked.incrementAndGet(); // we're working one.
 
                     Object instance = instances.get(key);
                     if (instance == null) {
                         try {
-                            // this can throw ... TODO: handle instantiation failure.
+                            // this can throw
                             instance = createAndActivate(key);
                         } catch (final RuntimeException e) {
-                            drainPendingMessages(wp, true);
+                            // This will drain the swamp
+                            final WorkingQueueHolder mailbox = getQueue(wp);
+                            if (mailbox.queue != null) {
+                                mailbox.queue.forEach(m -> {
+                                    LOGGER.debug("Failed to process message with key " + SafeString.objectDescription(m.key));
+                                    statCollector.messageDispatched(m); // the Mp is failed so update the stats appropriately
+                                    statCollector.messageFailed(true);
+                                    numBeingWorked.decrementAndGet();
+                                });
+                            }
                             instance = null;
                         }
                     }
 
                     KeyedMessage curMessage = message;
-                    while (curMessage != null) {
+                    while (curMessage != null) { // can't be null the first time
                         if (instance != null) { // if it's null then activation failed.
                             invokeOperation(instance, Operation.handle, curMessage);
-                            numBeingWorked.decrementAndGet(); // decrement the initial increment.
+                        } else { // activate failed
+                            LOGGER.debug("Can't handle message {} because the creation of the Mp seems to have failed.",
+                                    SafeString.objectDescription(key));
                         }
+                        numBeingWorked.decrementAndGet(); // decrement the initial increment.
 
                         // work off the queue.
                         final WorkingQueueHolder mailbox = getQueue(wp); // spin until I have it.
-                        if (mailbox.queue != null && mailbox.queue.size() > 0) {
-                            curMessage = mailbox.queue.remove(0);
+                        if (mailbox.queue != null && mailbox.queue.size > 0) { // if there are messages in the queue
+                            curMessage = mailbox.queue.removeFirst(); // take a message off the queue
                             // curMessage CAN'T be NULL!!!!
 
-                            // put it back - releasing the lock
+                            // releasing the lock on the mailbox ... we're ready to process 'curMessage' on the next loop
                             wp.mailbox.set(mailbox);
                         } else {
                             curMessage = null;
-                            // DON'T put the queue back ... it will stay empty until we're completely done.
+                            // (1) NOTE: DON'T put the queue back. This will prevent ALL other threads trying to drop a message
+                            // in this box. When an alternate thread tries to open the mailbox to put a message in, if it can't,
+                            // because THIS thread's left it locked, the other thread starts the process from the beginning
+                            // re-attempting to get exclusive control over the Mp. In other words, the other thread only makes
+                            // a single attempt and if it fails it goes back to attempting to get the Mp from the beginning.
+                            //
+                            // This thread cannot give up the current Mp if there's a potential for any data to end up in the
+                            // queue. Since we're about to give up the Mp we cannot allow the mailbox to become available
+                            // therefore we cannot allow any other threads to spin on it.
                         }
                     }
                 } finally {
@@ -315,20 +371,22 @@ public class NonLockingContainer extends Container {
                     if (mailbox != null) { // we got the queue!
                         try {
                             keepTrying = false;
+                            // drop a message in the mailbox queue and mark it as being worked.
                             numBeingWorked.incrementAndGet();
                             if (mailbox.queue == null)
-                                mailbox.queue = new ArrayList<>(4);
+                                mailbox.queue = new CountedLinkedList<>();
                             mailbox.queue.add(message);
                         } finally {
                             // put it back - releasing the lock
                             alreadyThere.mailbox.set(mailbox);
                         }
-                    } else {
+                    } else { // if we didn't get the queue, we need to start completely over.
+                             // otherwise there's a potential race condition - see the note at (1).
                         // we failed to get the queue ... maybe we'll have better luck next time.
                     }
-                }
-            }
-        }
+                } // we didn't get the lock and we're blocking and we're now done handling the mailbox
+            } // we didn't get the lock so we tried the mailbox (or ended becasuse we're non-blocking)
+        } // keep working
     }
 
     @Override

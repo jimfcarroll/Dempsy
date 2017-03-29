@@ -34,8 +34,37 @@ public interface StatsCollector extends AutoCloseable {
      */
     void messageReceived(Object message);
 
+    public class Transaction implements AutoCloseable {
+        private boolean failed = false;
+        private boolean mpFailure = false;
+        private final Object message;
+        private final StatsCollector ths;
+
+        private Transaction(final StatsCollector ths, final Object message) {
+            this.message = message;
+            this.ths = ths;
+            ths.messageDispatched(message);
+        }
+
+        public void failed(final boolean mpFailure) {
+            failed = true;
+            this.mpFailure = mpFailure;
+        }
+
+        @Override
+        public void close() {
+            if (failed)
+                ths.messageFailed(mpFailure);
+            else ths.messageProcessed(message);
+        }
+    }
+
+    public default Transaction messageProcessTransaction(final Object message) {
+        return new Transaction(this, message);
+    }
+
     /**
-     * MPContainer calls this method when before invoking an MP's <code>MessageHandler</code>
+     * Container calls this method before invoking an MP's <code>MessageHandler</code>
      * or Output method.
      * 
      * A message processing "transaction" opens with a messageDispatched. It

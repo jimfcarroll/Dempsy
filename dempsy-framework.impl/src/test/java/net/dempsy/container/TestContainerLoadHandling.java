@@ -16,6 +16,7 @@
 
 package net.dempsy.container;
 
+import static net.dempsy.utils.test.ConditionPoll.poll;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
@@ -28,6 +29,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 
 import org.junit.After;
 import org.junit.Before;
@@ -83,16 +85,15 @@ public class TestContainerLoadHandling {
         this.containerId = containerId;
     }
 
-    private static int NTHREADS = 2;
+    private static int NUMMPS = 10;
+    private static int NUMRUNS = 1;
+    private static int DUPFACTOR = 1000;
+
     private static Logger logger = LoggerFactory.getLogger(TestContainerLoadHandling.class);
 
     private Container container;
     private MetricGetters stats;
     private MockDispatcher dispatcher;
-    private CountDownLatch startLatch; // when set, the TestMessageProcessor waits to begin processing
-    private CountDownLatch finishLatch; // counts down when any instance of TestMessageProcessor COMPLETES handling a message
-    private CountDownLatch imIn; // this counts how many TestMessageProcessor message handlers, OR output calls have been entered
-    private CountDownLatch finishOutputLatch;
     private volatile boolean forceOutputException = false;
 
     private int sequence = 0;
@@ -151,7 +152,9 @@ public class TestContainerLoadHandling {
         KeyedMessage message;
         boolean block;
 
-        static CountDownLatch latch = new CountDownLatch(0);
+        static AtomicLong finishedCount = new AtomicLong(0);
+        static CountDownLatch startLatch = new CountDownLatch(0);
+        static AtomicLong processingCount = new AtomicLong(0);
 
         public SendMessageThread(final Container mpc, final KeyedMessage message, final boolean block) {
             this.mpc = mpc;
@@ -162,14 +165,17 @@ public class TestContainerLoadHandling {
         @Override
         public void run() {
             try {
-                mpc.dispatch(message, !block); // onmessage is "failfast" which is !block
+                processingCount.incrementAndGet();
+                startLatch.await(); // wait for the command to go
+                mpc.dispatch(message, block);
             } catch (final Exception e) {
                 failed = true;
                 System.out.println("FAILED!");
                 e.printStackTrace();
                 throw new RuntimeException(e);
             } finally {
-                latch.countDown();
+                finishedCount.incrementAndGet();
+                processingCount.decrementAndGet();
             }
         }
     }
@@ -183,27 +189,27 @@ public class TestContainerLoadHandling {
     /*
      * Utility methods for tests
      */
-    private void sendMessage(final Container mpc, final Object message, final boolean block) throws Exception {
-        new Thread(new SendMessageThread(mpc, km(message), block)).start();
+    private Thread sendMessage(final Container mpc, final Object message, final boolean block) throws Exception {
+        final Thread ret = new Thread(new SendMessageThread(mpc, km(message), block));
+        ret.start();
+        return ret;
     }
 
     /*
      * Test Infastructure
      */
     class MockDispatcher extends Dispatcher {
-        public CountDownLatch latch = null;
-
         public List<KeyedMessageWithType> messages = Collections.synchronizedList(new ArrayList<>());
 
         @Override
         public void dispatch(final KeyedMessageWithType message) {
             assertNotNull(message);
             messages.add(message);
-            if (latch != null)
-                latch.countDown();
         }
 
     }
+
+    CountDownLatch commonLongRunningHandler = null;
 
     @Mp
     public class TestMessageProcessor implements Cloneable {
@@ -212,30 +218,27 @@ public class TestContainerLoadHandling {
 
         @Override
         public TestMessageProcessor clone() throws CloneNotSupportedException {
-            return (TestMessageProcessor) super.clone();
+            final TestMessageProcessor ret = (TestMessageProcessor) super.clone();
+            return ret;
         }
 
         @MessageHandler
         public MockOutputMessage handleMessage(final MockInputMessage msg) throws InterruptedException {
-            imIn.countDown();
-            startLatch.await();
             logger.trace("handling key " + msg.getKey() + " count is " + messageCount);
+            if (commonLongRunningHandler != null)
+                commonLongRunningHandler.await();
             key = msg.getKey();
             messageCount++;
             msg.setProcessed(true);
             final MockOutputMessage out = new MockOutputMessage(msg.getKey());
-            finishLatch.countDown();
             return out;
         }
 
         @Output
         public MockOutputMessage doOutput() throws InterruptedException {
             logger.trace("handling output message for mp with key " + key);
-            imIn.countDown();
             // System.out.println("In Output with countdown:" + imIn);
             final MockOutputMessage out = new MockOutputMessage(key, "output");
-            if (finishOutputLatch != null)
-                finishOutputLatch.countDown();
 
             if (forceOutputException)
                 throw new RuntimeException("Forced Exception!");
@@ -248,102 +251,115 @@ public class TestContainerLoadHandling {
      * Actual Unit Tests
      */
 
-    /**
-     * Test the simple case of messages arriving slowly and always having a thread available.
-     */
-    @Test
-    public void testSimpleProcessingWithoutQueuing() throws Exception {
+    public void runSimpleProcessingWithoutQueuing(final boolean block) throws Exception {
         // Send NTHREADS Messages and wait for them to come out, then repeat
-        for (int i = 0; i < 3; i++) {
-            startLatch = new CountDownLatch(1);
-            finishLatch = new CountDownLatch(NTHREADS);
-            imIn = new CountDownLatch(NTHREADS);
-            dispatcher.latch = new CountDownLatch(NTHREADS);
+        for (int i = 0; i < NUMRUNS; i++) {
+            SendMessageThread.startLatch = new CountDownLatch(1); // set up a gate for starting
+            SendMessageThread.finishedCount.set(0);
+            SendMessageThread.processingCount.set(0);
 
-            final ArrayList<MockInputMessage> in = new ArrayList<MockInputMessage>();
-            for (int j = 0; j < NTHREADS; j++)
-                in.add(new MockInputMessage("key" + j));
+            final ArrayList<Thread> in = new ArrayList<Thread>();
+            for (int j = 0; j < NUMMPS; j++)
+                in.add(sendMessage(container, new MockInputMessage("key" + j), block));
 
-            SendMessageThread.latch = new CountDownLatch(in.size());
-            for (final MockInputMessage m : in)
-                sendMessage(container, m, false);
-
-            logger.trace("releasing workers");
-            startLatch.countDown();
-            logger.trace("should be running");
+            assertTrue(poll(o -> SendMessageThread.processingCount.get() == NUMMPS));
+            SendMessageThread.startLatch.countDown(); // let the messages go.
 
             // after sends are allowed to proceed
-            assertTrue("Timeout waiting on message to be sent", SendMessageThread.latch.await(2, TimeUnit.SECONDS));
+            assertTrue("Timeout waiting on message to be sent", poll(o -> SendMessageThread.finishedCount.get() >= NUMMPS));
+            assertEquals(NUMMPS, SendMessageThread.finishedCount.get());
 
-            assertTrue("Timeout waiting for MPs", finishLatch.await(2, TimeUnit.SECONDS));
-            while (stats.getInFlightMessageCount() > 0)
-                Thread.yield(); // give worker threads a chance to finish returning post latch
+            assertTrue(poll(o -> stats.getInFlightMessageCount() == 0));
 
-            assertTrue("Timeout waiting for MP sends", dispatcher.latch.await(2, TimeUnit.SECONDS));
-            assertEquals(NTHREADS * (i + 1), dispatcher.messages.size());
-            assertEquals(NTHREADS * (i + 1), stats.getProcessedMessageCount());
+            final int iter = i;
+            assertTrue(poll(o -> NUMMPS * (iter + 1) == dispatcher.messages.size()));
+            assertTrue(poll(o -> NUMMPS * (iter + 1) == stats.getProcessedMessageCount()));
+            assertTrue(poll(o -> in.stream().filter(t -> t.isAlive() == true).count() == 0));
+            assertEquals(0, stats.getDiscardedMessageCount());
         }
 
         checkStat(stats);
     }
 
     /**
+     * Test the simple case of messages arriving slowly and always having a thread available.
+     */
+    @Test
+    public void testSimpleProcessingWithoutQueuingBlocking() throws Exception {
+        runSimpleProcessingWithoutQueuing(true);
+    }
+
+    /**
+     * Test the simple case of messages arriving slowly and always having a thread available.
+     */
+    @Test
+    public void testSimpleProcessingWithoutQueuingNonBlocking() throws Exception {
+        runSimpleProcessingWithoutQueuing(false);
+    }
+
+    /**
      * Test the case where messages arrive faster than they are processed but the queue never exceeds the Thread Pool Size * 2, so no messages are discarded.
      */
     @Test
-    public void testMessagesCanQueueWithinLimits() throws Exception {
-        // Since the discard threshold is 2 * threads, send 3 * NTHREADS Messages,
-        // the 2*threads that are queued, plus the ntheads that are stalled
-        // in processing. Then wait for them to come out, none should be discarded
-        // Repeat the test to cover edge conditions that work the first time magically
-        for (int i = 0; i < 3; i++) {
-            logger.trace("starting loop " + i);
-            startLatch = new CountDownLatch(1);
-            finishLatch = new CountDownLatch(3 * NTHREADS);
-            imIn = new CountDownLatch(3 * NTHREADS);
-            dispatcher.latch = new CountDownLatch(3 * NTHREADS);
+    public void testMessagesCanQueueWithinLimitsBlocking() throws Exception {
+        for (int i = 0; i < NUMRUNS; i++) {
+            final int iter = i;
+            final long initialMessagesDispatched = stats.getMessagesDispatched();
 
-            final ArrayList<MockInputMessage> in = new ArrayList<MockInputMessage>();
-            for (int j = 0; j < (3 * NTHREADS); j++)
-                in.add(new MockInputMessage("key" + j));
+            SendMessageThread.startLatch = new CountDownLatch(1); // set up a gate for starting
+            SendMessageThread.finishedCount.set(0);
+            SendMessageThread.processingCount.set(0);
 
-            SendMessageThread.latch = new CountDownLatch(in.size());
-            for (final MockInputMessage m : in) {
-                sendMessage(container, m, false);
-                Thread.sleep(50); // let the exector so it can put the first two on threads
-                assertEquals(0, stats.getDiscardedMessageCount());
-                Thread.yield(); // allow the newly running thread to move on.
-            }
-            startLatch.countDown();
-            assertTrue("Timeout waiting on message to be sent", SendMessageThread.latch.await(2, TimeUnit.SECONDS));
+            commonLongRunningHandler = new CountDownLatch(1);
 
-            assertTrue("Timeout waiting for MPs", finishLatch.await(2, TimeUnit.SECONDS));
-            while (stats.getInFlightMessageCount() > 0)
-                Thread.yield(); // Give worker threads a chance to finish their returns
+            final ArrayList<Thread> in = new ArrayList<Thread>();
+            for (int j = 0; j < (DUPFACTOR * NUMMPS); j++)
+                in.add(sendMessage(container, new MockInputMessage("key" + j % NUMMPS), true));
 
-            assertTrue("Timeout waiting for MP sends", dispatcher.latch.await(2, TimeUnit.SECONDS));
-            assertEquals(3 * NTHREADS * (i + 1), dispatcher.messages.size());
-            assertEquals(3 * NTHREADS * (i + 1), stats.getProcessedMessageCount());
+            assertTrue(poll(o -> SendMessageThread.processingCount.get() == DUPFACTOR * NUMMPS));
+            SendMessageThread.startLatch.countDown(); // let the messages go.
+
+            // NUMMPS messages should be "dispatched"
+            assertTrue(poll(o -> (stats.getMessagesDispatched() - initialMessagesDispatched) == NUMMPS));
+
+            // all messages should be "in flight"
+            assertTrue(poll(o -> container.getMessageWorkingCount() == DUPFACTOR * NUMMPS));
+
+            Thread.sleep(50);
+
+            // NUMMPS messages should STILL be "dispatched"
+            assertTrue(poll(o -> (stats.getMessagesDispatched() - initialMessagesDispatched) == NUMMPS));
+
+            commonLongRunningHandler.countDown(); // let the rest of them go
+
+            // after sends are allowed to proceed
+            assertTrue("Timeout waiting on message to be sent", poll(o -> SendMessageThread.finishedCount.get() >= DUPFACTOR * NUMMPS));
+            assertEquals(DUPFACTOR * NUMMPS, SendMessageThread.finishedCount.get());
+
+            assertTrue(poll(o -> stats.getInFlightMessageCount() == 0));
+
+            assertTrue(poll(o -> DUPFACTOR * NUMMPS * (iter + 1) == dispatcher.messages.size()));
+            assertTrue(poll(o -> DUPFACTOR * NUMMPS * (iter + 1) == stats.getProcessedMessageCount()));
+            assertTrue(poll(o -> in.stream().filter(t -> t.isAlive() == true).count() == 0));
+            assertEquals(0, stats.getDiscardedMessageCount());
             checkStat(stats);
         }
     }
 
     @Test
     public void testExcessLoadIsDiscarded() throws Exception {
-        startLatch = new CountDownLatch(1);
-        finishLatch = new CountDownLatch(3 * NTHREADS);
-        imIn = new CountDownLatch(3 * NTHREADS);
-        dispatcher.latch = new CountDownLatch(3 * NTHREADS);
-        final ArrayList<MockInputMessage> in = new ArrayList<MockInputMessage>();
-        for (int j = 0; j < (3 * NTHREADS); j++)
-            in.add(new MockInputMessage("key" + j));
+        SendMessageThread.startLatch = new CountDownLatch(1); // set up a gate for starting
+        SendMessageThread.finishedCount.set(0);
+        SendMessageThread.processingCount.set(0);
 
-        // load up the queue with messages, none get discarded
-        SendMessageThread.latch = new CountDownLatch(in.size());
-        for (final MockInputMessage m : in) {
-            sendMessage(container, m, false);
-            assertEquals(0, stats.getDiscardedMessageCount());
-        }
+        commonLongRunningHandler = new CountDownLatch(1);
+
+        final ArrayList<Thread> in = new ArrayList<Thread>();
+        for (int j = 0; j < (DUPFACTOR * NUMMPS); j++)
+            in.add(sendMessage(container, new MockInputMessage("key" + j % NUMMPS), false));
+
+        assertTrue(poll(o -> SendMessageThread.processingCount.get() == DUPFACTOR * NUMMPS));
+        SendMessageThread.startLatch.countDown(); // let the messages go.
 
         // Add another message. Since processing is waiting on the start latch,
         /// it should be discarded
@@ -367,13 +383,13 @@ public class TestContainerLoadHandling {
         }
 
         assertTrue("Timeout waiting for MP sends", dispatcher.latch.await(2, TimeUnit.SECONDS));
-        assertEquals(3 * NTHREADS, dispatcher.messages.size());
-        assertEquals(3 * NTHREADS, stats.getProcessedMessageCount());
-        dispatcher.latch = new CountDownLatch(3 * NTHREADS); // reset the latch
+        assertEquals(3 * NUMMPS, dispatcher.messages.size());
+        assertEquals(3 * NUMMPS, stats.getProcessedMessageCount());
+        dispatcher.latch = new CountDownLatch(3 * NUMMPS); // reset the latch
 
         // Since the queue is drained, we should be able to drop a few more
         // on and they should just go
-        finishLatch = new CountDownLatch(3 * NTHREADS);
+        finishLatch = new CountDownLatch(3 * NUMMPS);
         SendMessageThread.latch = new CountDownLatch(in.size());
         for (final MockInputMessage m : in) {
             sendMessage(container, m, false);
@@ -387,8 +403,8 @@ public class TestContainerLoadHandling {
             Thread.yield();
 
         assertTrue("Timeout waiting for MPs", dispatcher.latch.await(2, TimeUnit.SECONDS));
-        assertEquals(2 * 3 * NTHREADS, dispatcher.messages.size());
-        assertEquals(2 * 3 * NTHREADS, stats.getProcessedMessageCount());
+        assertEquals(2 * 3 * NUMMPS, dispatcher.messages.size());
+        assertEquals(2 * 3 * NUMMPS, stats.getProcessedMessageCount());
         checkStat(stats);
     }
 
@@ -397,13 +413,13 @@ public class TestContainerLoadHandling {
 
         // prime the container with MP instances, by processing 4 * NTHREADS messages
         startLatch = new CountDownLatch(0); // do not hold up the starting of processing
-        finishLatch = new CountDownLatch(NTHREADS * 4); // we expect this many messages to be handled.
-        imIn = new CountDownLatch(4 * NTHREADS); // this is how many times the message processor handler has been entered
-        dispatcher.latch = new CountDownLatch(4 * NTHREADS); // this counts down whenever a message is dispatched
-        SendMessageThread.latch = new CountDownLatch(4 * NTHREADS); // when spawning a thread to send a message into an Container, this counts down once the message sending is complete
+        finishLatch = new CountDownLatch(NUMMPS * 4); // we expect this many messages to be handled.
+        imIn = new CountDownLatch(4 * NUMMPS); // this is how many times the message processor handler has been entered
+        dispatcher.latch = new CountDownLatch(4 * NUMMPS); // this counts down whenever a message is dispatched
+        SendMessageThread.latch = new CountDownLatch(4 * NUMMPS); // when spawning a thread to send a message into an Container, this counts down once the message sending is complete
 
         // invoke NTHREADS * 4 discrete messages each of which should cause an Mp to be created
-        for (int i = 0; i < (NTHREADS * 4); i++)
+        for (int i = 0; i < (NUMMPS * 4); i++)
             sendMessage(container, new MockInputMessage("key" + i), false);
 
         // wait for all of the messages to have been sent.
@@ -414,23 +430,20 @@ public class TestContainerLoadHandling {
 
         // the above can be triggered while still within the message processor handler so we wait
         // for the stats collector to have registered the processed messages.
-        Thread.yield(); // give the threads a chance to return after updating the latch
-        for (final long endTime = System.currentTimeMillis() + 10000; stats.getInFlightMessageCount() > 0 && endTime > System.currentTimeMillis();)
-            Thread.sleep(1); // give worker threads a chance to finish returning post latch
+        assertTrue(poll(o -> stats.getInFlightMessageCount() == 0));
 
         // with the startLatch set to 0 these should all complete.
-        assertEquals(0, stats.getInFlightMessageCount());
-        assertEquals(4 * NTHREADS, stats.getProcessedMessageCount());
+        assertEquals(4 * NUMMPS, stats.getProcessedMessageCount());
 
-        startLatch = new CountDownLatch(1); // now we are going to hold the Mps inside the message handler
-
+        // now we are going to hold the Mps inside the message handler
+        startLatch = new CountDownLatch(1);
         // we are going to send 2 messages (per thread)
-        finishLatch = new CountDownLatch(2 * NTHREADS);
+        finishLatch = new CountDownLatch(2 * NUMMPS);
         // ... and wait for the 2 message (per thread) to be in process (this startLatch will hold these from exiting)
-        imIn = new CountDownLatch(2 * NTHREADS); // (2 messages + 4 output) * nthreads
+        imIn = new CountDownLatch(2 * NUMMPS); // (2 messages + 4 output) * nthreads
 
         // send 2 message (per thread) which will be held up by the startLatch
-        for (int i = 0; i < (2 * NTHREADS); i++) {
+        for (int i = 0; i < (2 * NUMMPS); i++) {
             sendMessage(container, new MockInputMessage("key" + i), false);
             assertEquals(0, stats.getDiscardedMessageCount());
         }
@@ -438,16 +451,16 @@ public class TestContainerLoadHandling {
         // there ought to be 2 * NTHREADS inflight ops since the startLatch isn't triggered
         assertTrue("Timeout on initial messages", imIn.await(4, TimeUnit.SECONDS));
         checkStat(stats);
-        assertEquals(2 * NTHREADS, stats.getInFlightMessageCount());
+        assertEquals(2 * NUMMPS, stats.getInFlightMessageCount());
 
         // with those held up in message handling they wont have the output invoked. So when we invoke output we need to count
         // how many get through while the message processors are being held up. That means there should be 2 * NTHREAD held up
         // in message handling and 2 * NTHREAD more that can execute the output (since the total is 4 * NTHREAD).
-        finishOutputLatch = new CountDownLatch(2 * NTHREADS); // we should see 2 output
+        finishOutputLatch = new CountDownLatch(2 * NUMMPS); // we should see 2 output
 
         final long totalProcessedCount = stats.getProcessedMessageCount();
         // Generate an output message
-        imIn = new CountDownLatch(2 * NTHREADS);
+        imIn = new CountDownLatch(2 * NUMMPS);
 
         // kick off the output pass in another thread
         new Thread(new Runnable() {
@@ -460,19 +473,19 @@ public class TestContainerLoadHandling {
         // 2 * NTHREADS are at startLatch while there are 4 * NTHREADS total MPs.
         // Thererfore two outputs should have executed and two more are thrashing now.
         assertTrue("Timeout on initial messages", imIn.await(4, TimeUnit.SECONDS)); // wait for the 2 * NTHREADS output calls to be entered
-        assertTrue("Timeout on initial messages", finishOutputLatch.await(4 * NTHREADS, TimeUnit.SECONDS)); // wait for those two to actually finish output processing
+        assertTrue("Timeout on initial messages", finishOutputLatch.await(4 * NUMMPS, TimeUnit.SECONDS)); // wait for those two to actually finish output processing
 
         // there's a race condition between finishing the output and the output call being registered so we need to wait
-        for (final long endTime = System.currentTimeMillis() + (NTHREADS * 4000); endTime > System.currentTimeMillis() &&
-                ((2L * NTHREADS) + totalProcessedCount != stats.getProcessedMessageCount());)
+        for (final long endTime = System.currentTimeMillis() + (NUMMPS * 4000); endTime > System.currentTimeMillis() &&
+                ((2L * NUMMPS) + totalProcessedCount != stats.getProcessedMessageCount());)
             Thread.sleep(1);
 
-        assertEquals((2L * NTHREADS) + totalProcessedCount, stats.getProcessedMessageCount());
+        assertEquals((2L * NUMMPS) + totalProcessedCount, stats.getProcessedMessageCount());
 
         assertEquals(0, stats.getDiscardedMessageCount()); // no discarded messages
         checkStat(stats);
 
-        imIn = new CountDownLatch(2 * NTHREADS); // give me a place to wait for the remaining outputs.
+        imIn = new CountDownLatch(2 * NUMMPS); // give me a place to wait for the remaining outputs.
         startLatch.countDown(); // let the 2 MPs that are waiting run.
         assertTrue("Timeout waiting for MPs", finishLatch.await(6, TimeUnit.SECONDS));
         assertTrue("Timeout waiting for MP outputs to finish", imIn.await(6, TimeUnit.SECONDS));
@@ -491,51 +504,50 @@ public class TestContainerLoadHandling {
             if ("output".equals(m.getType()))
                 outMessages++;
         }
-        assertEquals(4 * NTHREADS, outMessages);
+        assertEquals(4 * NUMMPS, outMessages);
         checkStat(stats);
-
     }
 
     @Test
     public void testOutputOperationsAloneDoNotCauseDiscard() throws Exception {
         // prime the container with MP instances, by processing 4 * NTHREADS messages
         startLatch = new CountDownLatch(0);
-        finishLatch = new CountDownLatch(NTHREADS * 4);
+        finishLatch = new CountDownLatch(NUMMPS * 4);
         imIn = new CountDownLatch(0);
-        dispatcher.latch = new CountDownLatch(10 * NTHREADS);
+        dispatcher.latch = new CountDownLatch(10 * NUMMPS);
 
-        SendMessageThread.latch = new CountDownLatch(NTHREADS * 4);
-        for (int i = 0; i < (NTHREADS * 4); i++)
+        SendMessageThread.latch = new CountDownLatch(NUMMPS * 4);
+        for (int i = 0; i < (NUMMPS * 4); i++)
             sendMessage(container, new MockInputMessage("key" + i), false);
         assertTrue("Timeout on initial messages", finishLatch.await(4, TimeUnit.SECONDS));
         Thread.yield(); // cover any deltas between mp decrementing latch and returning
         assertTrue("Timeout waiting on message to be sent", SendMessageThread.latch.await(2, TimeUnit.SECONDS));
         checkStat(stats);
 
-        assertEquals(NTHREADS * 4, stats.getProcessedMessageCount());
+        assertEquals(NUMMPS * 4, stats.getProcessedMessageCount());
 
         startLatch = new CountDownLatch(1);
-        finishLatch = new CountDownLatch(6 * NTHREADS); // (4 output + 2 msg) * nthreads
+        finishLatch = new CountDownLatch(6 * NUMMPS); // (4 output + 2 msg) * nthreads
         // Generate an output message but force a failure.
         forceOutputException = true;
         container.outputPass(); // this should be ok inline.
         forceOutputException = false;
         assertEquals(0, stats.getDiscardedMessageCount()); // no discarded messages
-        assertEquals(NTHREADS * 4, stats.getMessageFailedCount()); // all output messages should have failed.
+        assertEquals(NUMMPS * 4, stats.getMessageFailedCount()); // all output messages should have failed.
 
         // run it again without the null pointer exception
-        finishOutputLatch = new CountDownLatch(NTHREADS * 4);
+        finishOutputLatch = new CountDownLatch(NUMMPS * 4);
         container.outputPass(); // this should be ok inline.
         assertEquals(0, stats.getDiscardedMessageCount()); // no discarded messages
-        assertEquals(NTHREADS * 4, stats.getMessageFailedCount()); // all output messages should have failed.
-        assertEquals(2 * (NTHREADS * 4), stats.getProcessedMessageCount());
+        assertEquals(NUMMPS * 4, stats.getMessageFailedCount()); // all output messages should have failed.
+        assertEquals(2 * (NUMMPS * 4), stats.getProcessedMessageCount());
         checkStat(stats);
 
-        imIn = new CountDownLatch(2 * NTHREADS);
-        finishLatch = new CountDownLatch(2 * NTHREADS);
-        SendMessageThread.latch = new CountDownLatch(NTHREADS * 2);
+        imIn = new CountDownLatch(2 * NUMMPS);
+        finishLatch = new CountDownLatch(2 * NUMMPS);
+        SendMessageThread.latch = new CountDownLatch(NUMMPS * 2);
         // put 2 * nthreads messages on the queue, expect no discards
-        for (int i = 0; i < (2 * NTHREADS); i++) {
+        for (int i = 0; i < (2 * NUMMPS); i++) {
             sendMessage(container, new MockInputMessage("key" + i), false);
             assertEquals(0, stats.getDiscardedMessageCount());
         }
@@ -553,7 +565,6 @@ public class TestContainerLoadHandling {
 
         assertTrue("Timeout waiting for MP sends", dispatcher.latch.await(2, TimeUnit.SECONDS));
         assertEquals(0, stats.getDiscardedMessageCount());
-        assertEquals(10 * NTHREADS, dispatcher.messages.size());
-
+        assertEquals(10 * NUMMPS, dispatcher.messages.size());
     }
 }

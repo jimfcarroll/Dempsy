@@ -27,249 +27,225 @@ import net.dempsy.monitoring.coda.MetricGetters;
  * implementation does, but useful for testing.
  *
  */
-public class BasicStatsCollector implements StatsCollector, MetricGetters
-{
-   private final AtomicLong messagesReceived = new AtomicLong();
-   private final AtomicLong messagesDiscarded = new AtomicLong();
-   private final AtomicLong messagesCollisions = new AtomicLong();
-   private final AtomicLong messagesDispatched = new AtomicLong();
-   private final AtomicLong messagesProcessed = new AtomicLong();
-   private final AtomicLong messagesFailed = new AtomicLong();
-   private final AtomicLong messagesSent = new AtomicLong();
-   private final AtomicLong messagesUnsent = new AtomicLong();
-   private final AtomicLong inProcessMessages = new AtomicLong();
-   private final AtomicLong numberOfMPs = new AtomicLong();
-   private final AtomicLong mpsCreated = new AtomicLong();
-   private final AtomicLong mpsDeleted = new AtomicLong();
-   
-   private final AtomicLong preInstantiationDuration = new AtomicLong();
-   private final AtomicLong mpHandleMessageDuration = new AtomicLong();
-   private final AtomicLong outputInvokeDuration = new AtomicLong();
-   private final AtomicLong evictionPassDuration = new AtomicLong();
-   
-   private final AtomicLong bytesReceived = new AtomicLong();
-   private final AtomicLong bytesSent = new AtomicLong();
-   
-   private Gauge currentMessagesPendingGauge = null;
-   private Gauge currentMessagesOutPendingGauge = null;
-   
-   private static class BasicTimerContext implements StatsCollector.TimerContext
-   {
-      private long startTime = System.currentTimeMillis();
-      private AtomicLong toIncrement;
-      
-      private BasicTimerContext(AtomicLong toIncrement) { this.toIncrement = toIncrement; }
-      
-      public void stop() { toIncrement.addAndGet(System.currentTimeMillis() - startTime); }
-   }
-   
-   @Override
-   public long getDiscardedMessageCount()
-   {
-      return messagesDiscarded.longValue();
-   }
+public class BasicStatsCollector implements StatsCollector, MetricGetters {
+    private final AtomicLong messagesReceived = new AtomicLong();
+    private final AtomicLong messagesDiscarded = new AtomicLong();
+    private final AtomicLong messagesCollisions = new AtomicLong();
+    private final AtomicLong messagesDispatched = new AtomicLong();
+    private final AtomicLong messagesProcessed = new AtomicLong();
+    private final AtomicLong messagesFailed = new AtomicLong();
+    private final AtomicLong messagesSent = new AtomicLong();
+    private final AtomicLong messagesUnsent = new AtomicLong();
+    private final AtomicLong inProcessMessages = new AtomicLong();
+    private final AtomicLong numberOfMPs = new AtomicLong();
+    private final AtomicLong mpsCreated = new AtomicLong();
+    private final AtomicLong mpsDeleted = new AtomicLong();
 
-   @Override
-   public long getMessageCollisionCount()
-   {
-      return messagesCollisions.longValue();
-   }
+    private final AtomicLong preInstantiationDuration = new AtomicLong();
+    private final AtomicLong mpHandleMessageDuration = new AtomicLong();
+    private final AtomicLong outputInvokeDuration = new AtomicLong();
+    private final AtomicLong evictionPassDuration = new AtomicLong();
 
-   @Override
-   public long getDispatchedMessageCount()
-   {
-      return messagesDispatched.longValue();
-   }
+    private final AtomicLong bytesReceived = new AtomicLong();
+    private final AtomicLong bytesSent = new AtomicLong();
 
-   @Override
-   public int getInFlightMessageCount()
-   {
-      return inProcessMessages.intValue();
-   }
+    private Gauge currentMessagesPendingGauge = null;
+    private Gauge currentMessagesOutPendingGauge = null;
 
-   @Override
-   public long getMessageFailedCount()
-   {
-      return messagesFailed.longValue();
-   }
+    private static class BasicTimerContext implements StatsCollector.TimerContext {
+        private final long startTime = System.currentTimeMillis();
+        private final AtomicLong toIncrement;
 
-   @Override
-   public long getProcessedMessageCount()
-   {
-      return numberOfMPs.longValue();
-   }
+        private BasicTimerContext(final AtomicLong toIncrement) {
+            this.toIncrement = toIncrement;
+        }
 
-   @Override
-   public void messageDiscarded(Object message)
-   {
-      messagesDiscarded.incrementAndGet();
-      inProcessMessages.decrementAndGet();
-   }
+        @Override
+        public void stop() {
+            toIncrement.addAndGet(System.currentTimeMillis() - startTime);
+        }
+    }
 
-   @Override
-   public void messageCollision(Object message)
-   {
-      messagesCollisions.incrementAndGet();
-   }
+    @Override
+    public long getDiscardedMessageCount() {
+        return messagesDiscarded.longValue();
+    }
 
-   @Override
-   public void messageDispatched(Object message)
-   {
-      messagesDispatched.incrementAndGet();
-      inProcessMessages.decrementAndGet();
-   }
+    @Override
+    public long getMessageCollisionCount() {
+        return messagesCollisions.longValue();
+    }
 
-   @Override
-   public void messageFailed(boolean mpFailure)
-   {
-      messagesFailed.incrementAndGet();
-      inProcessMessages.decrementAndGet();
-   }
+    @Override
+    public long getDispatchedMessageCount() {
+        return messagesDispatched.longValue();
+    }
 
-   @Override
-   public void messageNotSent()
-   {
-      messagesUnsent.incrementAndGet();
-   }
+    @Override
+    public int getInFlightMessageCount() {
+        return inProcessMessages.intValue();
+    }
 
-   @Override
-   public void messageProcessed(Object message)
-   {
-      messagesProcessed.incrementAndGet();
-      inProcessMessages.decrementAndGet();
-   }
+    @Override
+    public long getMessageFailedCount() {
+        return messagesFailed.longValue();
+    }
 
-   @Override
-   public void messageProcessorCreated(Object key)
-   {
-      mpsCreated.incrementAndGet();
-      numberOfMPs.incrementAndGet();
-   }
+    @Override
+    public long getProcessedMessageCount() {
+        return numberOfMPs.longValue();
+    }
 
-   @Override
-   public void messageProcessorDeleted(Object key)
-   {
-      mpsDeleted.incrementAndGet();
-      numberOfMPs.decrementAndGet();
-   }
+    @Override
+    public void messageDiscarded(final Object message) {
+        messagesDiscarded.incrementAndGet();
+        inProcessMessages.decrementAndGet();
+    }
 
-   @Override
-   public void messageReceived(byte[] message)
-   {
-      messagesReceived.incrementAndGet();
-   }
+    @Override
+    public void messageCollision(final Object message) {
+        messagesCollisions.incrementAndGet();
+    }
 
-   @Override
-   public void messageSent(byte[] message)
-   {
-      messagesSent.incrementAndGet();
-   }
+    @Override
+    public void messageDispatched(final Object message) {
+        messagesDispatched.incrementAndGet();
+        inProcessMessages.decrementAndGet();
+    }
 
-   @Override
-   public void stop()
-   {
-      // no-op
+    @Override
+    public void messageFailed(final boolean mpFailure) {
+        messagesFailed.incrementAndGet();
+        inProcessMessages.decrementAndGet();
+    }
 
-   }
+    @Override
+    public void messageNotSent() {
+        messagesUnsent.incrementAndGet();
+    }
 
-   @Override
-   public double getPreInstantiationDuration()
-   {
-      return preInstantiationDuration.doubleValue();
-   }
-   
-   @Override
-   public StatsCollector.TimerContext preInstantiationStarted()
-   {
-      return new BasicTimerContext(preInstantiationDuration);
-   }
-   
-   @Override
-   public StatsCollector.TimerContext handleMessageStarted()
-   {
-      return new BasicTimerContext(mpHandleMessageDuration);
-   }
-   
-   @Override
-   public double getOutputInvokeDuration()
-   {
-      return outputInvokeDuration.doubleValue();
-   }
-   
-   @Override
-   public StatsCollector.TimerContext outputInvokeStarted()
-   {
-      return new BasicTimerContext(outputInvokeDuration);
-   }
-   
-	@Override
-	public StatsCollector.TimerContext evictionPassStarted() {
-	    return new BasicTimerContext(evictionPassDuration);
-	}
+    @Override
+    public void messageProcessed(final Object message) {
+        messagesProcessed.incrementAndGet();
+        inProcessMessages.decrementAndGet();
+    }
 
-	@Override
-	public double getEvictionDuration() {
-		return evictionPassDuration.doubleValue();
-	}
+    @Override
+    public void messageProcessorCreated(final Object key) {
+        mpsCreated.incrementAndGet();
+        numberOfMPs.incrementAndGet();
+    }
 
-   @Override
-   public long getMessagesNotSentCount()
-   {
-      return messagesUnsent.get();
-   }
+    @Override
+    public void messageProcessorDeleted(final Object key) {
+        mpsDeleted.incrementAndGet();
+        numberOfMPs.decrementAndGet();
+    }
 
-   @Override
-   public long getMessagesSentCount()
-   {
-      return messagesSent.get();
-   }
-   
-   @Override
-   public long getMessagesReceivedCount()
-   {
-      return messagesReceived.get();
-   }
-   
-   @Override
-   public long getMessageProcessorsCreated() { return mpsCreated.get(); }
+    @Override
+    public void messageReceived(final byte[] message) {
+        messagesReceived.incrementAndGet();
+    }
 
-   @Override
-   public long getMessageProcessorCount() { return numberOfMPs.get(); }
+    @Override
+    public void messageSent(final byte[] message) {
+        messagesSent.incrementAndGet();
+    }
 
-   @Override
-   public long getMessageBytesSent()
-   {
-      return bytesSent.get();
-   }
+    @Override
+    public void stop() {
+        // no-op
 
-   @Override
-   public long getMessageBytesReceived()
-   {
-      return bytesReceived.get();
-   }
+    }
 
-   @Override
-   public synchronized void setMessagesPendingGauge(Gauge currentMessagesPendingGauge)
-   {
-      this.currentMessagesPendingGauge = currentMessagesPendingGauge;
-   }
+    @Override
+    public double getPreInstantiationDuration() {
+        return preInstantiationDuration.doubleValue();
+    }
 
-   @Override
-   public synchronized void setMessagesOutPendingGauge(Gauge currentMessagesOutPendingGauge)
-   {
-      this.currentMessagesOutPendingGauge = currentMessagesOutPendingGauge;
-   }
+    @Override
+    public StatsCollector.TimerContext preInstantiationStarted() {
+        return new BasicTimerContext(preInstantiationDuration);
+    }
 
-   @Override
-   public synchronized long getMessagesPending()
-   {
-      return currentMessagesPendingGauge == null ? 0 : currentMessagesPendingGauge.value();
-   }
+    @Override
+    public StatsCollector.TimerContext handleMessageStarted() {
+        return new BasicTimerContext(mpHandleMessageDuration);
+    }
 
-   @Override
-   public synchronized long getMessagesOutPending()
-   {
-      return currentMessagesOutPendingGauge == null ? 0 : currentMessagesOutPendingGauge.value();
-   }
-	
+    @Override
+    public double getOutputInvokeDuration() {
+        return outputInvokeDuration.doubleValue();
+    }
+
+    @Override
+    public StatsCollector.TimerContext outputInvokeStarted() {
+        return new BasicTimerContext(outputInvokeDuration);
+    }
+
+    @Override
+    public StatsCollector.TimerContext evictionPassStarted() {
+        return new BasicTimerContext(evictionPassDuration);
+    }
+
+    @Override
+    public double getEvictionDuration() {
+        return evictionPassDuration.doubleValue();
+    }
+
+    @Override
+    public long getMessagesNotSentCount() {
+        return messagesUnsent.get();
+    }
+
+    @Override
+    public long getMessagesSentCount() {
+        return messagesSent.get();
+    }
+
+    @Override
+    public long getMessagesReceivedCount() {
+        return messagesReceived.get();
+    }
+
+    @Override
+    public long getMessageProcessorsCreated() {
+        return mpsCreated.get();
+    }
+
+    @Override
+    public long getMessageProcessorCount() {
+        return numberOfMPs.get();
+    }
+
+    @Override
+    public long getMessageBytesSent() {
+        return bytesSent.get();
+    }
+
+    @Override
+    public long getMessageBytesReceived() {
+        return bytesReceived.get();
+    }
+
+    @Override
+    public synchronized void setMessagesPendingGauge(final Gauge currentMessagesPendingGauge) {
+        this.currentMessagesPendingGauge = currentMessagesPendingGauge;
+    }
+
+    @Override
+    public synchronized void setMessagesOutPendingGauge(final Gauge currentMessagesOutPendingGauge) {
+        this.currentMessagesOutPendingGauge = currentMessagesOutPendingGauge;
+    }
+
+    @Override
+    public synchronized long getMessagesPending() {
+        return currentMessagesPendingGauge == null ? 0 : currentMessagesPendingGauge.value();
+    }
+
+    @Override
+    public synchronized long getMessagesOutPending() {
+        return currentMessagesOutPendingGauge == null ? 0 : currentMessagesOutPendingGauge.value();
+    }
+
 }

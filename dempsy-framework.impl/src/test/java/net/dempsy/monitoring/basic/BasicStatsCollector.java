@@ -87,6 +87,11 @@ public class BasicStatsCollector implements StatsCollector, MetricGetters {
     }
 
     @Override
+    public long getMessagesDispatched() {
+        return messagesDispatched.get();
+    }
+
+    @Override
     public long getMessageFailedCount() {
         return messagesFailed.longValue();
     }

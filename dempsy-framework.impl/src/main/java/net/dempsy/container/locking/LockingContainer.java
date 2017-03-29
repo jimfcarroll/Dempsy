@@ -34,6 +34,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
 import org.slf4j.Logger;
@@ -72,6 +73,7 @@ public class LockingContainer extends Container {
     private Set<String> messageTypes;
 
     private final AtomicBoolean isReady = new AtomicBoolean(false);
+    private final AtomicInteger numBeingWorked = new AtomicInteger(0);
 
     public LockingContainer() {
         if (outputConcurrency > 0)
@@ -138,6 +140,11 @@ public class LockingContainer extends Container {
     @Override
     public int getProcessorCount() {
         return instances.size();
+    }
+
+    @Override
+    public int getMessageWorkingCount() {
+        return numBeingWorked.get();
     }
 
     // ----------------------------------------------------------------------------
@@ -233,64 +240,69 @@ public class LockingContainer extends Container {
     // this is called directly from tests but shouldn't be accessed otherwise.
     @Override
     public void dispatch(final KeyedMessage message, final boolean block) throws IllegalArgumentException, ContainerException {
-        statCollector.messageReceived(message);
         if (message == null)
             return; // No. We didn't process the null message
 
         boolean evictedAndBlocking;
 
-        do {
-            evictedAndBlocking = false;
+        if (message == null || message.message == null)
+            throw new IllegalArgumentException("the container for " + clusterId + " attempted to dispatch null message.");
 
-            if (message == null || message.message == null)
-                throw new IllegalArgumentException("the container for " + clusterId + " attempted to dispatch null message.");
+        if (message.key == null)
+            throw new ContainerException("Message " + objectDescription(message.message) + " contains no key.");
 
-            if (message.key == null)
-                throw new ContainerException("Message " + objectDescription(message.message) + " contains no key.");
+        try {
+            numBeingWorked.incrementAndGet();
 
-            final InstanceWrapper wrapper = getInstanceForKey(message.key);
+            do {
+                evictedAndBlocking = false;
 
-            // wrapper will be null if the activate returns 'false'
-            if (wrapper != null) {
-                final Object instance = wrapper.getExclusive(block);
+                final InstanceWrapper wrapper = getInstanceForKey(message.key);
 
-                if (instance != null) { // null indicates we didn't get the lock
-                    try {
-                        if (wrapper.isEvicted()) {
-                            // if we're not blocking then we need to just return a failure. Otherwise we want to try again
-                            // because eventually the current Mp will be passivated and removed from the container and
-                            // a subsequent call to getInstanceForDispatch will create a new one.
-                            if (block) {
-                                Thread.yield();
-                                evictedAndBlocking = true; // we're going to try again.
-                            } else { // otherwise it's just like we couldn't get the lock. The Mp is busy being killed off.
-                                if (LOGGER.isTraceEnabled())
-                                    LOGGER.trace("the container for " + clusterId + " failed handle message due to evicted Mp "
-                                            + SafeString.valueOf(prototype));
+                // wrapper will be null if the activate returns 'false'
+                if (wrapper != null) {
+                    final Object instance = wrapper.getExclusive(block);
 
-                                statCollector.messageDiscarded(message);
-                                statCollector.messageCollision(message);
-                            }
-                        } else
-                            invokeOperation(wrapper.getInstance(), Operation.handle, message);
-                    } finally {
-                        wrapper.releaseLock();
+                    if (instance != null) { // null indicates we didn't get the lock
+                        try {
+                            if (wrapper.isEvicted()) {
+                                // if we're not blocking then we need to just return a failure. Otherwise we want to try again
+                                // because eventually the current Mp will be passivated and removed from the container and
+                                // a subsequent call to getInstanceForDispatch will create a new one.
+                                if (block) {
+                                    Thread.yield();
+                                    evictedAndBlocking = true; // we're going to try again.
+                                } else { // otherwise it's just like we couldn't get the lock. The Mp is busy being killed off.
+                                    if (LOGGER.isTraceEnabled())
+                                        LOGGER.trace("the container for " + clusterId + " failed handle message due to evicted Mp "
+                                                + SafeString.valueOf(prototype));
+
+                                    statCollector.messageDiscarded(message);
+                                    statCollector.messageCollision(message);
+                                }
+                            } else
+                                invokeOperation(wrapper.getInstance(), Operation.handle, message);
+                        } finally {
+                            wrapper.releaseLock();
+                        }
+                    } else { // ... we didn't get the lock
+                        if (LOGGER.isTraceEnabled())
+                            LOGGER.trace("the container for " + clusterId + " failed to obtain lock on " + SafeString.valueOf(prototype));
+                        statCollector.messageDiscarded(message);
+                        statCollector.messageCollision(message);
                     }
-                } else { // ... we didn't get the lock
-                    if (LOGGER.isTraceEnabled())
-                        LOGGER.trace("the container for " + clusterId + " failed to obtain lock on " + SafeString.valueOf(prototype));
-                    statCollector.messageDiscarded(message);
-                    statCollector.messageCollision(message);
+                } else {
+                    // if we got here then the activate on the Mp explicitly returned 'false'
+                    if (LOGGER.isDebugEnabled())
+                        LOGGER.debug("the container for " + clusterId + " failed to activate the Mp for " + SafeString.valueOf(prototype));
+                    // we consider this "processed"
+                    break; // leave the do/while loop
                 }
-            } else {
-                // if we got here then the activate on the Mp explicitly returned 'false'
-                if (LOGGER.isDebugEnabled())
-                    LOGGER.debug("the container for " + clusterId + " failed to activate the Mp for " + SafeString.valueOf(prototype));
-                // we consider this "processed"
-                break; // leave the do/while loop
-            }
-        } while (evictedAndBlocking);
+            } while (evictedAndBlocking);
 
+        } finally {
+            numBeingWorked.decrementAndGet();
+        }
     }
 
     @Override

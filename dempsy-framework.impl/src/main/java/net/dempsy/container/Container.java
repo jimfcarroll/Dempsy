@@ -92,6 +92,15 @@ public abstract class Container implements Service {
      */
     public abstract int getProcessorCount();
 
+    /**
+     * The number of messages the container is currently working on. This may not match the 
+     * stats collector's numberOfInFlight messages which is a measurement of how many messages
+     * are currently being handled by MPs. This represents how many messages have been given
+     * dispatched to the container that are yet being processed. It includes internal queuing
+     * in the container as well as messages actually in Mp handlers.
+     */
+    public abstract int getMessageWorkingCount();
+
     // ----------------------------------------------------------------------------
     // Test Hooks
     // ----------------------------------------------------------------------------
