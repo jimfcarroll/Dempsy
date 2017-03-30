@@ -74,6 +74,21 @@ public class NonLockingContainer extends Container {
 
     // message key -> instance that handles messages with this key
     // changes to this map will be synchronized; read-only may be concurrent
+
+    public static class StupidHashMap {
+        public static class Node {
+            int hash;
+            Object key;
+            Object value;
+            Node next;
+        }
+    }
+
+    private static class InstanceWrapper {
+        private Object instance;
+
+    }
+
     private final Map<Object, WorkingPlaceholder> working = new ConcurrentHashMap<>();
     private final Map<Object, Object> instances = new ConcurrentHashMap<>();
 
