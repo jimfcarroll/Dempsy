@@ -74,8 +74,8 @@ public class TestContainerLoadHandling {
     @Parameters
     public static Collection<Object[]> data() {
         return Arrays.asList(new Object[][] {
-                { NonLockingContainer.class.getPackage().getName() },
-                { LockingContainer.class.getPackage().getName() }
+                { LockingContainer.class.getPackage().getName() },
+                { NonLockingContainer.class.getPackage().getName() }
         });
     }
 
@@ -86,8 +86,8 @@ public class TestContainerLoadHandling {
     }
 
     private static int NUMMPS = 10;
-    private static int NUMRUNS = 1;
-    private static int DUPFACTOR = 1000;
+    private static int NUMRUNS = 50;
+    private static int DUPFACTOR = 10;
 
     private static Logger logger = LoggerFactory.getLogger(TestContainerLoadHandling.class);
 

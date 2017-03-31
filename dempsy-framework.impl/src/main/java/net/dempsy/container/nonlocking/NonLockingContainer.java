@@ -22,9 +22,7 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -64,33 +62,8 @@ public class NonLockingContainer extends Container {
     private final Logger LOGGER = LoggerFactory.getLogger(getClass());
     private StatsCollector statCollector;
 
-    // private static final int NUM_SHARDS = 1024;
-    //
-    // private static class Contents {
-    // Map<Object, WorkingPlaceholder> working = new ConcurrentHashMap<>();
-    // }
-    // @SuppressWarnings("unchecked")
-    // AtomicReference<Contents>[] shardedContents = new AtomicReference[NUM_SHARDS];
-
-    // message key -> instance that handles messages with this key
-    // changes to this map will be synchronized; read-only may be concurrent
-
-    public static class StupidHashMap {
-        public static class Node {
-            int hash;
-            Object key;
-            Object value;
-            Node next;
-        }
-    }
-
-    private static class InstanceWrapper {
-        private Object instance;
-
-    }
-
-    private final Map<Object, WorkingPlaceholder> working = new ConcurrentHashMap<>();
-    private final Map<Object, Object> instances = new ConcurrentHashMap<>();
+    private final StupidHashMap<Object, WorkingPlaceholder> working = new StupidHashMap<>();
+    private final StupidHashMap<Object, Object> instances = new StupidHashMap<>();
 
     // Scheduler to handle eviction thread.
     private ScheduledExecutorService evictionScheduler;
@@ -288,11 +261,21 @@ public class NonLockingContainer extends Container {
         return waitFor(() -> wp.mailbox.getAndSet(null));
     }
 
-    private static <T> T putIfAbsent(final Map<Object, T> map, final Object key, final T value) {
-        final T ret = map.get(key);
-        if (ret == null)
-            return map.putIfAbsent(key, value);
-        return ret;
+    private static final <T> T putIfAbsent(final StupidHashMap<Object, T> map, final Object key, final Supplier<T> value) {
+        // final T ret = map.get(key);
+        // if (ret == null)
+        // return map.putIfAbsent(key, value);
+        // return ret;
+        return map.putIfAbsent(key, value);
+    }
+
+    final static class MutRef<X> {
+        public X ref;
+
+        public final X set(final X ref) {
+            this.ref = ref;
+            return ref;
+        }
     }
 
     @Override
@@ -310,10 +293,12 @@ public class NonLockingContainer extends Container {
 
         boolean keepTrying = true;
         while (keepTrying) {
-            final WorkingPlaceholder wp = new WorkingPlaceholder();
-            final WorkingPlaceholder alreadyThere = putIfAbsent(working, key, wp);
+
+            final MutRef<WorkingPlaceholder> wph = new MutRef();
+            final WorkingPlaceholder alreadyThere = putIfAbsent(working, key, () -> wph.set(new WorkingPlaceholder()));
 
             if (alreadyThere == null) { // we're it!
+                final WorkingPlaceholder wp = wph.ref;
                 keepTrying = false; // we're not going to keep trying.
                 try { // if we don't get the WorkingPlaceholder out of the working map then that Mp will forever be lost.
                     numBeingWorked.incrementAndGet(); // we're working one.
