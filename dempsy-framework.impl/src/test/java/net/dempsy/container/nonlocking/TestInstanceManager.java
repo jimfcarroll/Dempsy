@@ -47,7 +47,7 @@ import net.dempsy.util.executor.AutoDisposeSingleThreadScheduler;
 
 public class TestInstanceManager {
 
-    private NonLockingContainer manager;
+    private Container manager;
 
     // ----------------------------------------------------------------------------
     // Test classes -- must be static/public for introspection
@@ -235,11 +235,11 @@ public class TestInstanceManager {
     StatsCollector statsCollector;
 
     @SuppressWarnings("resource")
-    public NonLockingContainer setupContainer(final MessageProcessorLifecycle<?> prototype) throws ContainerException {
+    public Container setupContainer(final MessageProcessorLifecycle<?> prototype) throws ContainerException {
         dispatcher = new DummyDispatcher();
         statsCollector = new BasicStatsCollector();
 
-        manager = (NonLockingContainer) new NonLockingContainer().setMessageProcessor(prototype).setClusterId(new ClusterId("test", "test"));
+        manager = new NonLockingContainer().setMessageProcessor(prototype).setClusterId(new ClusterId("test", "test"));
         manager.setDispatcher(dispatcher);
         manager.start(new Infrastructure() {
 
@@ -319,7 +319,7 @@ public class TestInstanceManager {
 
     @Test
     public void testMpThrows() throws Exception {
-        try (final NonLockingContainer dispatcher = setupContainer(new MessageProcessor<ThrowMe>(new ThrowMe()));) {
+        try (final Container dispatcher = setupContainer(new MessageProcessor<ThrowMe>(new ThrowMe()));) {
 
             dispatcher.dispatch(km(new MessageOne(123)), true);
 

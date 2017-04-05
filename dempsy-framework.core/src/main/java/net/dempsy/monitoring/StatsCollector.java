@@ -25,8 +25,13 @@ public interface StatsCollector extends AutoCloseable {
     /**
      * A timer context is returned from start calls on the Stats collector to provide a thread-safe context for stopping the started timer. This is analogous to Yammer Metrics use of Times.
      */
-    public static interface TimerContext {
+    public static interface TimerContext extends AutoCloseable {
         public void stop();
+
+        @Override
+        public default void close() {
+            stop();
+        }
     }
 
     /**

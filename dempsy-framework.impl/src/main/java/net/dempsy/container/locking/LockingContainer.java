@@ -344,9 +344,7 @@ public class LockingContainer extends Container {
         if (!check.isGenerallyEvitable() || !isRunning)
             return;
 
-        StatsCollector.TimerContext tctx = null;
-        try {
-            tctx = statCollector.evictionPassStarted();
+        try (final StatsCollector.TimerContext tctx = statCollector.evictionPassStarted()) {
 
             // we need to make a copy of the instances in order to make sure
             // the eviction check is done at once.
@@ -412,9 +410,6 @@ public class LockingContainer extends Container {
                     instancesToEvict.remove(key);
 
             }
-        } finally {
-            if (tctx != null)
-                tctx.stop();
         }
     }
 
@@ -577,11 +572,8 @@ public class LockingContainer extends Container {
     }
 
     public void invokeOutput() {
-        final StatsCollector.TimerContext tctx = statCollector.outputInvokeStarted();
-        try {
+        try (final StatsCollector.TimerContext tctx = statCollector.outputInvokeStarted();) {
             outputPass();
-        } finally {
-            tctx.stop();
         }
     }
 

@@ -49,6 +49,7 @@ import net.dempsy.NodeManager;
 import net.dempsy.cluster.local.LocalClusterSessionFactory;
 import net.dempsy.config.ClusterId;
 import net.dempsy.config.Node;
+import net.dempsy.container.altnonlocking.NonLockingAltContainer;
 import net.dempsy.container.locking.LockingContainer;
 import net.dempsy.container.mocks.ContainerTestMessage;
 import net.dempsy.container.mocks.OutputMessage;
@@ -86,8 +87,9 @@ public class TestContainer {
     @Parameters
     public static Collection<Object[]> data() {
         return Arrays.asList(new Object[][] {
+                { LockingContainer.class.getPackage().getName() },
                 { NonLockingContainer.class.getPackage().getName() },
-                { LockingContainer.class.getPackage().getName() }
+                { NonLockingAltContainer.class.getPackage().getName() },
         });
     }
 

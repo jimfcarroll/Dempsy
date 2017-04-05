@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package net.dempsy.container.nonlocking;
+package net.dempsy.container.altnonlocking;
 
 import static net.dempsy.util.SafeString.objectDescription;
 
@@ -34,7 +34,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 import org.slf4j.Logger;
@@ -53,18 +52,20 @@ import net.dempsy.util.StupidHashMap;
 
 /**
  * <p>
- * The {@link NonLockingContainer} manages the lifecycle of message processors for the node that it's instantiated in.
+ * The {@link NonLockingAltContainer} manages the lifecycle of message processors for the node that it's instantiated in.
  * </p>
  * 
  * The container is simple in that it does no thread management. When it's called it assumes that the transport 
  * has provided the thread that's needed
  */
-public class NonLockingContainer extends Container {
+public class NonLockingAltContainer extends Container {
     private final Logger LOGGER = LoggerFactory.getLogger(getClass());
+    private static final int SPIN_TRIES = 100;
     private StatsCollector statCollector;
 
-    private final StupidHashMap<Object, WorkingPlaceholder> working = new StupidHashMap<>();
-    private final StupidHashMap<Object, Object> instances = new StupidHashMap<>();
+    // message key -> instance that handles messages with this key
+    // changes to this map will be synchronized; read-only may be concurrent
+    private final StupidHashMap<Object, InstanceWrapper> instances = new StupidHashMap<Object, InstanceWrapper>();
 
     // Scheduler to handle eviction thread.
     private ScheduledExecutorService evictionScheduler;
@@ -75,36 +76,7 @@ public class NonLockingContainer extends Container {
     private final AtomicBoolean isReady = new AtomicBoolean(false);
     private final AtomicInteger numBeingWorked = new AtomicInteger(0);
 
-    private static class CountedLinkedList<T> {
-        private final LinkedList<T> list = new LinkedList<>();
-        private int size = 0;
-
-        public void forEach(final Consumer<T> c) {
-            list.forEach(c);
-        }
-
-        public T removeFirst() {
-            size--;
-            return list.removeFirst();
-        }
-
-        public boolean add(final T v) {
-            final boolean ret = list.add(v);
-            if (ret)
-                size++;
-            return ret;
-        }
-    }
-
-    private static class WorkingQueueHolder {
-        CountedLinkedList<KeyedMessage> queue = null;
-    }
-
-    protected static class WorkingPlaceholder {
-        AtomicReference<WorkingQueueHolder> mailbox = new AtomicReference<>(new WorkingQueueHolder());
-    }
-
-    public NonLockingContainer() {
+    public NonLockingAltContainer() {
         if (outputConcurrency > 0)
             setupOutputConcurrency();
     }
@@ -184,91 +156,65 @@ public class NonLockingContainer extends Container {
     // Internals
     // ----------------------------------------------------------------------------
 
-    // this is called directly from tests but shouldn't be accessed otherwise.
+    private static class CountedLinkedList<T> {
+        private final LinkedList<T> list = new LinkedList<>();
+        private int size = 0;
 
-    private Object createAndActivate(final Object key) throws ContainerException {
-        Object instance = null;
-        try {
-            instance = prototype.newInstance();
-        } catch (final DempsyException e) {
-            throw new ContainerException("the container for " + clusterId + " failed to create a new instance of " +
-                    SafeString.valueOf(prototype) + " for the key " + SafeString.objectDescription(key) +
-                    " because the clone method threw an exception.", e);
-        } catch (final RuntimeException e) {
-            throw new ContainerException("the container for " + clusterId + " failed to create a new instance of " +
-                    SafeString.valueOf(prototype) + " for the key " + SafeString.objectDescription(key) +
-                    " because the clone invocation resulted in an unknown exception.", e);
+        public T removeFirst() {
+            size--;
+            return list.removeFirst();
         }
 
-        if (instance == null)
-            throw new ContainerException("the container for " + clusterId + " failed to create a new instance of " +
-                    SafeString.valueOf(prototype) + " for the key " + SafeString.objectDescription(key) +
-                    ". The value returned from the clone call appears to be null.");
-
-        // activate
-        final byte[] data = null;
-        if (LOGGER.isTraceEnabled())
-            LOGGER.trace("the container for " + clusterId + " is activating instance " + String.valueOf(instance)
-                    + " with " + ((data != null) ? data.length : 0) + " bytes of data"
-                    + " via " + SafeString.valueOf(prototype));
-
-        boolean activateSuccessful = false;
-        try {
-            prototype.activate(instance, key, data);
-            activateSuccessful = true;
-        } catch (final IllegalArgumentException e) {
-            throw new ContainerException(
-                    "the container for " + clusterId + " failed to invoke the activate method of " + SafeString.valueOf(prototype) +
-                            ". Is it declared to take a byte[]?",
-                    e);
-        } catch (final DempsyException e) {
-            throw new ContainerException(
-                    "the container for " + clusterId + " failed to invoke the activate method of " + SafeString.valueOf(prototype) +
-                            ". Is the active method accessible - the class is public and the method is public?",
-                    e);
-        } catch (final RuntimeException e) {
-            throw new ContainerException(
-                    "the container for " + clusterId + " failed to invoke the activate method of " + SafeString.valueOf(prototype) +
-                            " because of an unknown exception.",
-                    e);
+        public boolean add(final T v) {
+            final boolean ret = list.add(v);
+            if (ret)
+                size++;
+            return ret;
         }
 
-        if (activateSuccessful) {
-            // we only want to create a wrapper and place the instance into the container
-            // if the instance activated correctly. If we got here then the above try block
-            // must have been successful.
-            if (instances.putIfAbsent(key, instance) != null) // once it goes into the map, we can remove it from the 'being worked' set
-                throw new IllegalStateException("WTF?");
-            // the newly added one.
-            statCollector.messageProcessorCreated(key);
+        public T pushPop(final T toPush) {
+            if (size == 0)
+                return toPush;
+            list.add(toPush);
+            return list.removeFirst();
         }
-        return instance;
     }
 
-    private static final int SPIN_TRIES = 100;
+    private static class WorkingQueueHolder {
+        final AtomicReference<CountedLinkedList<KeyedMessage>> queue;
 
-    private <T> T waitFor(final Supplier<T> condition) {
-        int counter = SPIN_TRIES;
+        WorkingQueueHolder(final boolean locked) {
+            queue = locked ? new AtomicReference<>(null) : new AtomicReference<>(new CountedLinkedList<>());
+        }
+    }
+
+    private static <T> T setIfAbsent(final AtomicReference<T> ref, final Supplier<T> val) {
         do {
-            final T ret = condition.get();
-            if (ret != null)
-                return ret;
-            if (counter > 0)
-                counter--;
-            else Thread.yield();
+            final T maybeRet = ref.get();
+            if (maybeRet != null)
+                return maybeRet;
+
+            final T value = val.get();
+            if (ref.compareAndSet(null, value))
+                return null;
         } while (true);
     }
 
-    private WorkingQueueHolder getQueue(final WorkingPlaceholder wp) {
-        return waitFor(() -> wp.mailbox.getAndSet(null));
-    }
+    protected static class InstanceWrapper {
+        private final Object instance;
+        private boolean evicted = false;
+        private final AtomicReference<WorkingQueueHolder> mailbox = new AtomicReference<>(null);
 
-    private static final <T> T putIfAbsent(final StupidHashMap<Object, T> map, final Object key, final Supplier<T> value) {
-        // final T ret = map.get(key);
-        // if (ret == null)
-        // return map.putIfAbsent(key, value);
-        // return ret;
-        return map.putIfAbsent(key, value);
+        public InstanceWrapper(final Object o) {
+            this.instance = o;
+        }
+
+        // ----------------------------------------------------------------------------
+        // Test access
+        // ----------------------------------------------------------------------------
+        protected Object getInstance() {
+            return instance;
+        }
     }
 
     final static class MutRef<X> {
@@ -280,118 +226,94 @@ public class NonLockingContainer extends Container {
         }
     }
 
+    private static <T> T waitFor(final Supplier<T> condition) {
+        int counter = SPIN_TRIES;
+        do {
+            final T ret = condition.get();
+            if (ret != null)
+                return ret;
+            if (counter > 0)
+                counter--;
+            else Thread.yield();
+        } while (true);
+    }
+
+    private static CountedLinkedList<KeyedMessage> getQueue(final WorkingQueueHolder wp) {
+        return waitFor(() -> wp.queue.getAndSet(null));
+    }
+
+    // this is called directly from tests but shouldn't be accessed otherwise.
     @Override
     public void dispatch(final KeyedMessage message, final boolean block) throws IllegalArgumentException, ContainerException {
         if (message == null)
             return; // No. We didn't process the null message
 
-        if (message.message == null)
+        if (message == null || message.message == null)
             throw new IllegalArgumentException("the container for " + clusterId + " attempted to dispatch null message.");
 
         if (message.key == null)
             throw new ContainerException("Message " + objectDescription(message.message) + " contains no key.");
 
-        final Object key = message.key;
+        numBeingWorked.incrementAndGet();
 
-        boolean keepTrying = true;
-        while (keepTrying) {
+        boolean instanceDone = false;
+        while (!instanceDone) {
+            instanceDone = true;
+            final InstanceWrapper wrapper = getInstanceForKey(message.key);
 
-            final MutRef<WorkingPlaceholder> wph = new MutRef<>();
-            final WorkingPlaceholder alreadyThere = putIfAbsent(working, key, () -> wph.set(new WorkingPlaceholder()));
+            // wrapper will be null if the activate returns 'false'
+            if (wrapper != null) {
+                final MutRef<WorkingQueueHolder> mref = new MutRef<>();
+                boolean messageDone = false;
+                while (!messageDone) {
+                    messageDone = true;
 
-            if (alreadyThere == null) { // we're it!
-                final WorkingPlaceholder wp = wph.ref;
-                keepTrying = false; // we're not going to keep trying.
-                try { // if we don't get the WorkingPlaceholder out of the working map then that Mp will forever be lost.
-                    numBeingWorked.incrementAndGet(); // we're working one.
+                    final WorkingQueueHolder mailbox = setIfAbsent(wrapper.mailbox, () -> mref.set(new WorkingQueueHolder(false)));
 
-                    Object instance = instances.get(key);
-                    if (instance == null) {
-                        try {
-                            // this can throw
-                            instance = createAndActivate(key);
-                        } catch (final RuntimeException e) {
-                            // This will drain the swamp
-                            final WorkingQueueHolder mailbox = getQueue(wp);
-                            if (mailbox.queue != null) {
-                                mailbox.queue.forEach(m -> {
-                                    LOGGER.debug("Failed to process message with key " + SafeString.objectDescription(m.key), e);
-                                    statCollector.messageDispatched(m); // the Mp is failed so update the stats appropriately
-                                    statCollector.messageFailed(true);
-                                    numBeingWorked.decrementAndGet();
-                                });
+                    // if mailbox is null then I got it.
+                    if (mailbox == null) {
+                        final WorkingQueueHolder box = mref.ref; // can't be null if I got the mailbox
+                        final CountedLinkedList<KeyedMessage> q = getQueue(box); // spin until I get the queue
+                        KeyedMessage toProcess = q.pushPop(message);
+                        box.queue.lazySet(q); // put the queue back
+
+                        while (toProcess != null) {
+                            invokeOperation(wrapper.instance, Operation.handle, toProcess);
+                            numBeingWorked.getAndDecrement();
+
+                            // get the next message
+                            final CountedLinkedList<KeyedMessage> queue = getQueue(box);
+                            if (queue.size == 0)
+                                // we need to leave the queue out
+                                break;
+
+                            toProcess = queue.removeFirst();
+                            box.queue.lazySet(queue);
+                        }
+
+                        // release the mailbox
+                        wrapper.mailbox.set(null);
+                    } else {
+                        // we didn't get exclusive access so let's see if we can add the message to the mailbox
+                        // make one try at putting the message in the mailbox.
+                        final CountedLinkedList<KeyedMessage> q = mailbox.queue.getAndSet(null);
+
+                        if (q != null) { // I got it!
+                            q.add(message);
+                            mailbox.queue.lazySet(q);
+                        } else {
+                            // see if we're evicted.
+                            if (wrapper.evicted) {
+                                instanceDone = false;
+                                break; // start back at getting the instance.
                             }
-                            instance = null;
+                            messageDone = false; // start over from the top.
                         }
                     }
-
-                    KeyedMessage curMessage = message;
-                    while (curMessage != null) { // can't be null the first time
-                        if (instance != null) { // if it's null then activation failed.
-                            invokeOperation(instance, Operation.handle, curMessage);
-                        } else { // activate failed
-                            LOGGER.debug("Can't handle message {} because the creation of the Mp seems to have failed.",
-                                    SafeString.objectDescription(key));
-                        }
-                        numBeingWorked.decrementAndGet(); // decrement the initial increment.
-
-                        if (instance != null) {
-                            // work off the queue.
-                            final WorkingQueueHolder mailbox = getQueue(wp); // spin until I have it.
-                            if (mailbox.queue != null && mailbox.queue.size > 0) { // if there are messages in the queue
-                                curMessage = mailbox.queue.removeFirst(); // take a message off the queue
-                                // curMessage CAN'T be NULL!!!!
-
-                                // releasing the lock on the mailbox ... we're ready to process 'curMessage' on the next loop
-                                wp.mailbox.set(mailbox);
-                            } else {
-                                curMessage = null;
-                                // (1) NOTE: DON'T put the queue back. This will prevent ALL other threads trying to drop a message
-                                // in this box. When an alternate thread tries to open the mailbox to put a message in, if it can't,
-                                // because THIS thread's left it locked, the other thread starts the process from the beginning
-                                // re-attempting to get exclusive control over the Mp. In other words, the other thread only makes
-                                // a single attempt and if it fails it goes back to attempting to get the Mp from the beginning.
-                                //
-                                // This thread cannot give up the current Mp if there's a potential for any data to end up in the
-                                // queue. Since we're about to give up the Mp we cannot allow the mailbox to become available
-                                // therefore we cannot allow any other threads to spin on it.
-                            }
-                        }
-                    }
-                } finally {
-                    if (working.remove(key) == null)
-                        System.out.println("WTF?");
                 }
-            } else { // ... we didn't get the lock
-                if (!block) { // blocking means no collisions allowed.
-                    if (LOGGER.isTraceEnabled())
-                        LOGGER.trace("the container for " + clusterId + " failed to obtain lock on " + SafeString.valueOf(prototype));
-                    statCollector.messageCollision(message);
-                    statCollector.messageDiscarded(message);
-                    keepTrying = false;
-                } else {
-                    // try and get the queue.
-                    final WorkingQueueHolder mailbox = alreadyThere.mailbox.getAndSet(null);
+            }
+        }
 
-                    if (mailbox != null) { // we got the queue!
-                        try {
-                            keepTrying = false;
-                            // drop a message in the mailbox queue and mark it as being worked.
-                            numBeingWorked.incrementAndGet();
-                            if (mailbox.queue == null)
-                                mailbox.queue = new CountedLinkedList<>();
-                            mailbox.queue.add(message);
-                        } finally {
-                            // put it back - releasing the lock
-                            alreadyThere.mailbox.set(mailbox);
-                        }
-                    } else { // if we didn't get the queue, we need to start completely over.
-                             // otherwise there's a potential race condition - see the note at (1).
-                        // we failed to get the queue ... maybe we'll have better luck next time.
-                    }
-                } // we didn't get the lock and we're blocking and we're now done handling the mailbox
-            } // we didn't get the lock so we tried the mailbox (or ended becasuse we're non-blocking)
-        } // keep working
     }
 
     @Override
@@ -399,8 +321,8 @@ public class NonLockingContainer extends Container {
         if (!prototype.isEvictionSupported() || !isRunning)
             return;
 
+        final MutRef<WorkingQueueHolder> mref = new MutRef<>();
         try (final StatsCollector.TimerContext tctx = statCollector.evictionPassStarted();) {
-
             // we need to make a copy of the instances in order to make sure
             // the eviction check is done at once.
             final Set<Object> keys = new HashSet<>(instances.size() + 10);
@@ -408,48 +330,40 @@ public class NonLockingContainer extends Container {
 
             while (keys.size() > 0 && instances.size() > 0 && isRunning) {
                 for (final Object key : keys) {
+                    final InstanceWrapper wrapper = instances.get(key);
 
-                    final WorkingPlaceholder wp = new WorkingPlaceholder();
-                    // we're going to hold up all incomming message to this mp
-                    wp.mailbox.getAndSet(null); // this blocks other threads from
-                                                // dropping messages in the mailbox
-
-                    final WorkingPlaceholder alreadyThere = working.putIfAbsent(key, wp); // try to get a lock
-
-                    if (alreadyThere == null) { // we got it the lock
-                        try {
-                            final Object instance = instances.get(key);
-
-                            if (instance != null) {
-                                boolean evictMe;
-                                try {
-                                    evictMe = prototype.invokeEvictable(instance);
-                                } catch (final RuntimeException e) {
-                                    LOGGER.warn("Checking the eviction status/passivating of the Mp " + SafeString.objectDescription(instance) +
-                                            " resulted in an exception.", e.getCause());
-                                    evictMe = false;
-                                }
-
-                                if (evictMe) {
-                                    try {
-                                        prototype.passivate(instance);
-                                    } catch (final Throwable e) {
-                                        LOGGER.warn("Checking the eviction status/passivating of the Mp "
-                                                + SafeString.objectDescription(instance) + " resulted in an exception.", e);
-                                    }
-
-                                    // even if passivate throws an exception, if the eviction check returned 'true' then
-                                    // we need to remove the instance.
-                                    instances.remove(key);
-                                    statCollector.messageProcessorDeleted(key);
-                                }
-                            } else {
-                                LOGGER.warn("There was an attempt to evict a non-existent Mp for key " + SafeString.objectDescription(key));
+                    if (wrapper != null) { // if the MP still exists
+                        final WorkingQueueHolder mailbox = setIfAbsent(wrapper.mailbox, () -> mref.set(new WorkingQueueHolder(true)));
+                        if (mailbox == null) { // this means I got it.
+                            // it was created locked so no one else will be able to drop messages in the mailbox.
+                            final Object instance = wrapper.instance;
+                            boolean evictMe;
+                            try {
+                                evictMe = prototype.invokeEvictable(instance);
+                            } catch (final RuntimeException e) {
+                                LOGGER.warn("Checking the eviction status/passivating of the Mp " + SafeString.objectDescription(instance) +
+                                        " resulted in an exception.", e.getCause());
+                                evictMe = false;
                             }
-                        } finally {
-                            working.remove(key); // releases this back to the world
-                        }
-                    }
+
+                            if (evictMe) {
+                                try {
+                                    prototype.passivate(instance);
+                                } catch (final Throwable e) {
+                                    LOGGER.warn("Checking the eviction status/passivating of the Mp "
+                                            + SafeString.objectDescription(instance) + " resulted in an exception.", e);
+                                }
+
+                                // even if passivate throws an exception, if the eviction check returned 'true' then
+                                // we need to remove the instance.
+                                instances.remove(key);
+                                wrapper.evicted = true;
+                                statCollector.messageProcessorDeleted(key);
+                            } else {
+                                wrapper.mailbox.set(null); // release the mailbox
+                            }
+                        } // end - I got the lock. Otherwise it's too busy to evict.
+                    } // end if mp exists. Otherwise the mp is already gone.
                 }
             }
         }
@@ -525,21 +439,19 @@ public class NonLockingContainer extends Container {
         // own state changes.
         final AtomicLong numExecutingOutputs = new AtomicLong(0);
 
+        final MutRef<WorkingQueueHolder> mref = new MutRef<>();
+
         // keep going until all of the outputs have been invoked
         while (toOutput.size() > 0 && isRunning) {
             for (final Iterator<Object> iter = toOutput.iterator(); iter.hasNext();) {
                 final Object key = iter.next();
 
-                final WorkingPlaceholder wp = new WorkingPlaceholder();
-                // we're going to hold up all incomming message to this mp
-                wp.mailbox.getAndSet(null); // this blocks other threads from
-                                            // dropping messages in the mailbox
+                final InstanceWrapper wrapper = instances.get(key);
 
-                final WorkingPlaceholder alreadyThere = working.putIfAbsent(key, wp); // try to get a lock
-                if (alreadyThere == null) { // we got it the lock
-                    final Object instance = instances.get(key);
-
-                    if (instance != null) {
+                if (wrapper != null) { // if the MP still exists
+                    final WorkingQueueHolder mailbox = setIfAbsent(wrapper.mailbox, () -> mref.set(new WorkingQueueHolder(true)));
+                    if (mailbox == null) { // this means I got it.
+                        // it was created locked so no one else will be able to drop messages in the mailbox.
                         final Semaphore taskSepaphore = taskLock;
 
                         // This task will release the wrapper's lock.
@@ -549,9 +461,9 @@ public class NonLockingContainer extends Container {
                             public void run() {
                                 try {
                                     if (isRunning)
-                                        invokeOperation(instance, Operation.output, null);
+                                        invokeOperation(wrapper.instance, Operation.output, null);
                                 } finally {
-                                    working.remove(key); // releases this back to the world
+                                    wrapper.mailbox.set(null); // releases this back to the world
 
                                     // this signals that we're done.
                                     synchronized (numExecutingOutputs) {
@@ -573,7 +485,7 @@ public class NonLockingContainer extends Container {
                                 taskSepaphore.acquire();
                                 executorService.execute(task);
                             } catch (final RejectedExecutionException e) {
-                                working.remove(key); // we never got into the run so we need to release the lock
+                                wrapper.mailbox.set(null); // we never got into the run so we need to release the lock
                                 // this may happen because of a race condition between the
                                 taskSepaphore.release();
                             } catch (final InterruptedException e) {
@@ -584,18 +496,18 @@ public class NonLockingContainer extends Container {
                                 // Not releasing the taskSepaphore assumes the acquire never executed.
                                 // if (since) the acquire never executed we also need to release the
                                 // wrapper lock or that Mp will never be usable again.
-                                working.remove(key); // we never got into the run so we need to release the lock
+                                wrapper.mailbox.set(null); // we never got into the run so we need to release the lock
                             }
                         } else
                             task.run();
 
                         iter.remove();
 
-                    } else {
-                        working.remove(key);
-                        LOGGER.warn("There was an attempt to evict a non-existent Mp for key " + SafeString.objectDescription(key));
-                    }
-                } // didn't get the lock
+                    } // didn't get the lock
+                } else { // end if mp exists. Otherwise the mp is already gone.
+                    iter.remove();
+                    LOGGER.warn("There was an attempt to output a non-existent Mp for key " + SafeString.objectDescription(key));
+                }
             } // loop over every mp
         } // end while there are still Mps that haven't had output invoked.
 
@@ -615,11 +527,10 @@ public class NonLockingContainer extends Container {
             }
         }
         // =======================================================
-
     }
 
     public void invokeOutput() {
-        try (final StatsCollector.TimerContext tctx = statCollector.outputInvokeStarted();) {
+        try (final StatsCollector.TimerContext tctx = statCollector.outputInvokeStarted()) {
             outputPass();
         }
     }
@@ -628,13 +539,96 @@ public class NonLockingContainer extends Container {
     // Internals
     // ----------------------------------------------------------------------------
 
+    StupidHashMap<Object, Boolean> keysBeingWorked = new StupidHashMap<Object, Boolean>();
+
+    /**
+     * This is required to return non null or throw a ContainerException
+     */
+    InstanceWrapper getInstanceForKey(final Object key) throws ContainerException {
+        // common case has "no" contention
+        InstanceWrapper wrapper = instances.get(key);
+        if (wrapper != null)
+            return wrapper;
+
+        // otherwise we will be working to get one.
+        final Boolean tmplock = new Boolean(true);
+        Boolean lock = keysBeingWorked.putIfAbsent(key, tmplock);
+        if (lock == null)
+            lock = tmplock;
+
+        // otherwise we'll do an atomic check-and-update
+        synchronized (lock) {
+            wrapper = instances.get(key); // double checked lock?????
+            if (wrapper != null)
+                return wrapper;
+
+            Object instance = null;
+            try {
+                instance = prototype.newInstance();
+            } catch (final DempsyException e) {
+                throw new ContainerException("the container for " + clusterId + " failed to create a new instance of " +
+                        SafeString.valueOf(prototype) + " for the key " + SafeString.objectDescription(key) +
+                        " because the clone method threw an exception.", e);
+            } catch (final RuntimeException e) {
+                throw new ContainerException("the container for " + clusterId + " failed to create a new instance of " +
+                        SafeString.valueOf(prototype) + " for the key " + SafeString.objectDescription(key) +
+                        " because the clone invocation resulted in an unknown exception.", e);
+            }
+
+            if (instance == null)
+                throw new ContainerException("the container for " + clusterId + " failed to create a new instance of " +
+                        SafeString.valueOf(prototype) + " for the key " + SafeString.objectDescription(key) +
+                        ". The value returned from the clone call appears to be null.");
+
+            // activate
+            final byte[] data = null;
+            if (LOGGER.isTraceEnabled())
+                LOGGER.trace("the container for " + clusterId + " is activating instance " + String.valueOf(instance)
+                        + " with " + ((data != null) ? data.length : 0) + " bytes of data"
+                        + " via " + SafeString.valueOf(prototype));
+
+            boolean activateSuccessful = false;
+            try {
+                prototype.activate(instance, key, data);
+                activateSuccessful = true;
+            } catch (final IllegalArgumentException e) {
+                throw new ContainerException(
+                        "the container for " + clusterId + " failed to invoke the activate method of " + SafeString.valueOf(prototype) +
+                                ". Is it declared to take a byte[]?",
+                        e);
+            } catch (final DempsyException e) {
+                throw new ContainerException(
+                        "the container for " + clusterId + " failed to invoke the activate method of " + SafeString.valueOf(prototype) +
+                                ". Is the active method accessible - the class is public and the method is public?",
+                        e);
+            } catch (final RuntimeException e) {
+                throw new ContainerException(
+                        "the container for " + clusterId + " failed to invoke the activate method of " + SafeString.valueOf(prototype) +
+                                " because of an unknown exception.",
+                        e);
+            }
+
+            if (activateSuccessful) {
+                // we only want to create a wrapper and place the instance into the container
+                // if the instance activated correctly. If we got here then the above try block
+                // must have been successful.
+                wrapper = new InstanceWrapper(instance); // null check above.
+                instances.putIfAbsent(key, wrapper); // once it goes into the map, we can remove it from the 'being worked' set
+                keysBeingWorked.remove(key); // remove it from the keysBeingWorked since any subsequent call will get
+                // the newly added one.
+                statCollector.messageProcessorCreated(key);
+            }
+            return wrapper;
+        }
+    }
+
     public enum Operation {
         handle,
         output
     };
 
     /**
-     * helper method to invoke an operation (handle a message or run output) handling all of the exceptions and forwarding any results.
+     * helper method to invoke an operation (handle a message or run output) handling all of hte exceptions and forwarding any results.
      */
     private void invokeOperation(final Object instance, final Operation op, final KeyedMessage message) {
         if (instance != null) { // possibly passivated ...
@@ -669,6 +663,9 @@ public class NonLockingContainer extends Container {
                 LOGGER.error("the container for " + clusterId + " failed when trying to invoke " + op + " on " + objectDescription(instance) +
                         " due to an unknown exception.", e);
                 statCollector.messageFailed(false);
+
+                if (op == Operation.handle)
+                    throw e;
             }
         }
     }
