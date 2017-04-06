@@ -20,8 +20,9 @@ import net.dempsy.config.ClusterId;
 import net.dempsy.config.Node;
 import net.dempsy.container.Container;
 import net.dempsy.messages.Adaptor;
-import net.dempsy.monitoring.DummyStatsCollector;
-import net.dempsy.monitoring.StatsCollector;
+import net.dempsy.monitoring.ClusterStatsCollector;
+import net.dempsy.monitoring.ClusterStatsCollectorFactory;
+import net.dempsy.monitoring.NodeStatsCollector;
 import net.dempsy.router.RoutingStrategy;
 import net.dempsy.router.RoutingStrategy.ContainerAddress;
 import net.dempsy.router.RoutingStrategy.Inbound;
@@ -57,9 +58,11 @@ public class NodeManager implements Infrastructure, AutoCloseable {
     private Router router = null;
     private PersistentTask keepNodeRegstered = null;
     private RootPaths rootPaths = null;
-    private StatsCollector statsCollector;
+    private ClusterStatsCollectorFactory statsCollectorFactory;
+    private NodeStatsCollector nodeStatsCollector;
     private RoutingStrategyManager rsManager = null;
     private TransportManager tManager = null;
+    private NodeAddress nodeAddress = null;
 
     AtomicBoolean ptaskReady = new AtomicBoolean(false);
 
@@ -86,9 +89,11 @@ public class NodeManager implements Infrastructure, AutoCloseable {
     public NodeManager start() throws DempsyException {
         validate();
 
-        statsCollector = (StatsCollector) node.getStatsCollector();
-        if (statsCollector == null)
-            statsCollector = new DummyStatsCollector();
+        nodeStatsCollector = tr.track((NodeStatsCollector) node.getNodeStatsCollector());
+
+        // TODO: cleaner?
+        statsCollectorFactory = tr.track(new Manager<ClusterStatsCollectorFactory>(ClusterStatsCollectorFactory.class)
+                .getAssociatedInstance(node.getClusterStatsCollectorFactoryId()));
 
         // =====================================
         // set the dispatcher on adaptors and create containers for mp clusters
@@ -113,11 +118,10 @@ public class NodeManager implements Infrastructure, AutoCloseable {
         // =====================================
         // first gather node information
         receiver = (Receiver) node.getReceiver();
-        final NodeAddress nodeAddress = receiver.getAddress();
+        nodeAddress = receiver.getAddress();
 
         final NodeReceiver nodeReciever = tr
-                .track(new NodeReceiver(containers.stream().map(pc -> pc.container).collect(Collectors.toList()), threading,
-                        statsCollector));
+                .track(new NodeReceiver(containers.stream().map(pc -> pc.container).collect(Collectors.toList()), threading, nodeStatsCollector));
 
         final String nodeId = nodeAddress.getGuid();
         final Map<ClusterId, ClusterInformation> messageTypesByClusterId = new HashMap<>();
@@ -170,7 +174,7 @@ public class NodeManager implements Infrastructure, AutoCloseable {
 
         this.tManager = tr.start(new TransportManager(), this);
         this.rsManager = tr.start(new RoutingStrategyManager(), this);
-        this.router = tr.start(new Router(rsManager, nodeAddress, nodeReciever, tManager, statsCollector), this);
+        this.router = tr.start(new Router(rsManager, nodeAddress, nodeReciever, tManager, nodeStatsCollector), this);
 
         // set up containers
         containers.forEach(pc -> pc.container.setDispatcher(router));
@@ -254,8 +258,13 @@ public class NodeManager implements Infrastructure, AutoCloseable {
     }
 
     @Override
-    public StatsCollector getStatsCollector() {
-        return statsCollector;
+    public ClusterStatsCollector getClusterStatsCollector(final ClusterId clusterId) {
+        return statsCollectorFactory.createStatsCollector(clusterId, nodeAddress);
+    }
+
+    @Override
+    public NodeStatsCollector getNodeStatsCollector() {
+        return nodeStatsCollector;
     }
 
     @Override

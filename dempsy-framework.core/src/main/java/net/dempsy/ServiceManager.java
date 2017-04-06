@@ -40,7 +40,7 @@ public class ServiceManager<T extends Service> extends Manager<T> implements Ser
             try {
                 rsf.stop();
             } catch (final RuntimeException ret) {
-                LOGGER.warn("Failed to shut down RoutingStrategy Factory");
+                LOGGER.warn("Failed to shut down {}", clazz.getSimpleName());
             }
         });
     }

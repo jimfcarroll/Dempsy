@@ -47,6 +47,7 @@ import net.dempsy.container.ContainerException;
 import net.dempsy.messages.KeyedMessage;
 import net.dempsy.messages.KeyedMessageWithType;
 import net.dempsy.messages.MessageProcessorLifecycle;
+import net.dempsy.monitoring.ClusterStatsCollector;
 import net.dempsy.monitoring.StatsCollector;
 import net.dempsy.util.SafeString;
 import net.dempsy.util.StupidHashMap;
@@ -61,7 +62,7 @@ import net.dempsy.util.StupidHashMap;
  */
 public class NonLockingContainer extends Container {
     private final Logger LOGGER = LoggerFactory.getLogger(getClass());
-    private StatsCollector statCollector;
+    private ClusterStatsCollector statCollector;
 
     private final StupidHashMap<Object, WorkingPlaceholder> working = new StupidHashMap<>();
     private final StupidHashMap<Object, Object> instances = new StupidHashMap<>();
@@ -133,7 +134,7 @@ public class NonLockingContainer extends Container {
 
     @Override
     public void start(final Infrastructure infra) {
-        statCollector = infra.getStatsCollector();
+        statCollector = infra.getClusterStatsCollector(clusterId);
 
         validate();
 
@@ -367,7 +368,6 @@ public class NonLockingContainer extends Container {
                     if (LOGGER.isTraceEnabled())
                         LOGGER.trace("the container for " + clusterId + " failed to obtain lock on " + SafeString.valueOf(prototype));
                     statCollector.messageCollision(message);
-                    statCollector.messageDiscarded(message);
                     keepTrying = false;
                 } else {
                     // try and get the queue.

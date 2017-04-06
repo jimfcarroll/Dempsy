@@ -31,7 +31,7 @@ import org.springframework.context.support.ClassPathXmlApplicationContext;
 
 import net.dempsy.cluster.local.LocalClusterSessionFactory;
 import net.dempsy.config.Node;
-import net.dempsy.container.MetricGetters;
+import net.dempsy.container.ClusterMetricGetters;
 import net.dempsy.lifecycle.annotation.Activation;
 import net.dempsy.lifecycle.annotation.MessageHandler;
 import net.dempsy.lifecycle.annotation.MessageKey;
@@ -246,7 +246,7 @@ public class TestWordCount {
 
         WordProducer.latch = new CountDownLatch(1); // need to make it wait.
         final WordProducer adaptor;
-        final MetricGetters stats;
+        final ClusterMetricGetters stats;
 
         try (@SuppressWarnings("resource")
         final SystemPropertyManager props = new SystemPropertyManager()
@@ -261,7 +261,7 @@ public class TestWordCount {
             WordProducer.latch.countDown();
 
             adaptor = ctx.getBean(WordProducer.class);
-            stats = ctx.getBean(MetricGetters.class);
+            stats = ctx.getBean(ClusterMetricGetters.class);
 
             assertTrue(poll(o -> adaptor.done.get()));
             assertTrue(poll(o -> adaptor.numDispatched == stats.getProcessedMessageCount()));

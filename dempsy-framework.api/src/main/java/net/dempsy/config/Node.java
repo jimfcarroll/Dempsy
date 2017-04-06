@@ -23,7 +23,8 @@ public class Node {
 
     public final String application;
     private final List<Cluster> clusters = new ArrayList<>();
-    private Object statsCollector = null;
+    private String clusterStatsCollectorFactoryId = "net.dempsy.monitoring.dummy";
+    private Object nodeStatsCollector = null;
     private String defaultRoutingStrategyId = null;
     private Object receiver = null;
     private boolean configed = false;
@@ -50,8 +51,13 @@ public class Node {
         return ret;
     }
 
-    public Node statsCollector(final Object statsCollector) {
-        this.statsCollector = statsCollector;
+    public Node clusterStatsCollectorFactoryId(final String statsCollector) {
+        this.clusterStatsCollectorFactoryId = statsCollector;
+        return this;
+    }
+
+    public Node nodeStatsCollector(final Object statsCollector) {
+        this.nodeStatsCollector = statsCollector;
         return this;
     }
 
@@ -135,12 +141,20 @@ public class Node {
         return defaultRoutingStrategyId;
     }
 
-    public Node setStatsCollector(final Object statsCollector) {
-        return statsCollector(statsCollector);
+    public Node setClusterStatsCollectorFactoryId(final String statsCollector) {
+        return clusterStatsCollectorFactoryId(statsCollector);
     }
 
-    public Object getStatsCollector() {
-        return statsCollector;
+    public String getClusterStatsCollectorFactoryId() {
+        return clusterStatsCollectorFactoryId;
+    }
+
+    public Node setNodeStatsCollector(final Object statsCollector) {
+        return nodeStatsCollector(statsCollector);
+    }
+
+    public Object getNodeStatsCollector() {
+        return nodeStatsCollector;
     }
 
     public Node setReceiver(final Object receiver) {

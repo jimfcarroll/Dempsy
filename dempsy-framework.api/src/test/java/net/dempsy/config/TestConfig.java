@@ -19,7 +19,6 @@ package net.dempsy.config;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 import java.util.ArrayList;
@@ -110,7 +109,7 @@ public class TestConfig {
 
         assertNotNull(node.getReceiver());
         assertNotNull(cd.getRoutingStrategyId());
-        assertNull(node.getStatsCollector());
+        assertNotNull(node.getClusterStatsCollectorFactoryId());
     }
 
     @Test
@@ -123,7 +122,7 @@ public class TestConfig {
 
         assertNotNull(node.getReceiver());
         assertNotNull(cd.getRoutingStrategyId());
-        assertNull(node.getStatsCollector());
+        assertNotNull(node.getClusterStatsCollectorFactoryId());
     }
 
     @Test
@@ -132,9 +131,9 @@ public class TestConfig {
 
         Object appSer;
         String appRs;
-        Object appSc;
+        String appSc;
         final Node node = new Node("test").receiver(appSer = new Object())
-                .setStatsCollector(appSc = new Object()).setDefaultRoutingStrategyId(appRs = "a");
+                .setClusterStatsCollectorFactoryId(appSc = "s").setDefaultRoutingStrategyId(appRs = "a");
 
         Cluster cd = new Cluster("test-slot1").setAdaptor(new GoodAdaptor());
         clusterDefs.add(cd);
@@ -183,7 +182,7 @@ public class TestConfig {
         assertEquals(clusRs, node.getClusters().get(5).getRoutingStrategyId());
 
         assertEquals(new ClusterId("test", "test-slot1"), node.getClusters().get(0).getClusterId());
-        assertEquals(appSc, node.getStatsCollector());
+        assertEquals(appSc, node.getClusterStatsCollectorFactoryId());
     }
 
     @Test
@@ -191,12 +190,12 @@ public class TestConfig {
 
         Object appSer;
         String appRs;
-        Object appScf;
+        String appScf;
         String clusRs;
         final Node app = new Node("test")
                 .receiver(appSer = new Object())
                 .defaultRoutingStrategyId(appRs = "s")
-                .statsCollector(appScf = new Object());
+                .clusterStatsCollectorFactoryId(appScf = "st");
 
         app.cluster("test-slot1").adaptor(new GoodAdaptor());
         app.cluster("test-slot2").mp(new MessageProcessor<GoodTestMp>(new GoodTestMp())).destination("test-slot3");
@@ -228,7 +227,7 @@ public class TestConfig {
 
         assertEquals(new ClusterId("test", "test-slot1"), app.getClusters().get(0).getClusterId());
 
-        assertEquals(appScf, app.getStatsCollector());
+        assertEquals(appScf, app.getClusterStatsCollectorFactoryId());
     }
 
     @Test(expected = IllegalStateException.class)

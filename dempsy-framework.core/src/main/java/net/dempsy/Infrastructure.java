@@ -3,7 +3,9 @@ package net.dempsy;
 import java.util.Map;
 
 import net.dempsy.cluster.ClusterInfoSession;
-import net.dempsy.monitoring.StatsCollector;
+import net.dempsy.config.ClusterId;
+import net.dempsy.monitoring.ClusterStatsCollector;
+import net.dempsy.monitoring.NodeStatsCollector;
 import net.dempsy.util.executor.AutoDisposeSingleThreadScheduler;
 
 public interface Infrastructure {
@@ -13,7 +15,9 @@ public interface Infrastructure {
 
     RootPaths getRootPaths();
 
-    StatsCollector getStatsCollector();
+    ClusterStatsCollector getClusterStatsCollector(ClusterId clusterId);
+
+    NodeStatsCollector getNodeStatsCollector();
 
     Map<String, String> getConfiguration();
 

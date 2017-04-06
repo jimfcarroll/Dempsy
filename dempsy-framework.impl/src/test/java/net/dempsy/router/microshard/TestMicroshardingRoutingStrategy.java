@@ -22,8 +22,10 @@ import net.dempsy.cluster.DisruptibleSession;
 import net.dempsy.cluster.local.LocalClusterSessionFactory;
 import net.dempsy.config.ClusterId;
 import net.dempsy.messages.KeyedMessageWithType;
-import net.dempsy.monitoring.StatsCollector;
-import net.dempsy.monitoring.basic.BasicStatsCollector;
+import net.dempsy.monitoring.ClusterStatsCollector;
+import net.dempsy.monitoring.NodeStatsCollector;
+import net.dempsy.monitoring.basic.BasicNodeStatsCollector;
+import net.dempsy.monitoring.basic.BasicStatsCollectorFactory;
 import net.dempsy.router.RoutingStrategy;
 import net.dempsy.router.RoutingStrategy.ContainerAddress;
 import net.dempsy.router.RoutingStrategyManager;
@@ -41,10 +43,14 @@ public class TestMicroshardingRoutingStrategy {
     private static class TestInfrastructure implements Infrastructure {
         final ClusterInfoSession session;
         final AutoDisposeSingleThreadScheduler sched;
+        final BasicStatsCollectorFactory statsFact;
+        final BasicNodeStatsCollector nodeStats;
 
         TestInfrastructure(final ClusterInfoSession session, final AutoDisposeSingleThreadScheduler sched) {
             this.session = session;
             this.sched = sched;
+            statsFact = new BasicStatsCollectorFactory();
+            nodeStats = new BasicNodeStatsCollector();
         }
 
         @Override
@@ -63,13 +69,18 @@ public class TestMicroshardingRoutingStrategy {
         }
 
         @Override
-        public StatsCollector getStatsCollector() {
-            return new BasicStatsCollector();
+        public ClusterStatsCollector getClusterStatsCollector(final ClusterId clusterId) {
+            return statsFact.createStatsCollector(clusterId, null);
         }
 
         @Override
         public Map<String, String> getConfiguration() {
             return new HashMap<>();
+        }
+
+        @Override
+        public NodeStatsCollector getNodeStatsCollector() {
+            return nodeStats;
         }
     }
 

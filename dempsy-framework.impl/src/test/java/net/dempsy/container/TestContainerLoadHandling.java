@@ -57,8 +57,11 @@ import net.dempsy.lifecycle.annotation.utils.KeyExtractor;
 import net.dempsy.messages.Dispatcher;
 import net.dempsy.messages.KeyedMessage;
 import net.dempsy.messages.KeyedMessageWithType;
+import net.dempsy.monitoring.ClusterStatsCollector;
+import net.dempsy.monitoring.NodeStatsCollector;
 import net.dempsy.monitoring.StatsCollector;
-import net.dempsy.monitoring.basic.BasicStatsCollector;
+import net.dempsy.monitoring.basic.BasicClusterStatsCollector;
+import net.dempsy.monitoring.basic.BasicNodeStatsCollector;
 import net.dempsy.util.executor.AutoDisposeSingleThreadScheduler;
 
 /**
@@ -66,7 +69,7 @@ import net.dempsy.util.executor.AutoDisposeSingleThreadScheduler;
  */
 @RunWith(Parameterized.class)
 public class TestContainerLoadHandling {
-    private void checkStat(final MetricGetters stat) {
+    private void checkStat(final ClusterMetricGetters stat) {
         assertEquals(stat.getDispatchedMessageCount(),
                 stat.getMessageFailedCount() + stat.getProcessedMessageCount() + stat.getInFlightMessageCount());
     }
@@ -93,7 +96,8 @@ public class TestContainerLoadHandling {
     private static Logger logger = LoggerFactory.getLogger(TestContainerLoadHandling.class);
 
     private Container container;
-    private MetricGetters stats;
+    private BasicClusterStatsCollector clusterStats;
+    private BasicNodeStatsCollector nodeStats;
     private MockDispatcher dispatcher;
     private volatile boolean forceOutputException = false;
 
@@ -106,8 +110,9 @@ public class TestContainerLoadHandling {
         final ClusterId cid = new ClusterId("TestContainerLoadHandling", "test" + sequence++);
         dispatcher = new MockDispatcher();
 
-        final BasicStatsCollector sc = new BasicStatsCollector();
-        stats = sc;
+        final BasicClusterStatsCollector sc = new BasicClusterStatsCollector();
+        clusterStats = sc;
+        nodeStats = new BasicNodeStatsCollector();
 
         container = tr.track(new Manager<Container>(Container.class).getAssociatedInstance(containerId))
                 .setMessageProcessor(new MessageProcessor<TestMessageProcessor>(new TestMessageProcessor()))
@@ -117,7 +122,7 @@ public class TestContainerLoadHandling {
         container.start(new Infrastructure() {
 
             @Override
-            public StatsCollector getStatsCollector() {
+            public ClusterStatsCollector getClusterStatsCollector(final ClusterId clusterId) {
                 return sc;
             }
 
@@ -140,6 +145,11 @@ public class TestContainerLoadHandling {
             public Map<String, String> getConfiguration() {
                 return null;
             }
+
+            @Override
+            public NodeStatsCollector getNodeStatsCollector() {
+                return nodeStats;
+            }
         });
 
         forceOutputException = false;
@@ -148,7 +158,7 @@ public class TestContainerLoadHandling {
     @After
     public void tearDown() throws Exception {
         tr.stopAll();
-        ((StatsCollector) stats).stop();
+        ((StatsCollector) clusterStats).stop();
     }
 
     public static boolean failed = false;
@@ -275,16 +285,16 @@ public class TestContainerLoadHandling {
             assertTrue("Timeout waiting on message to be sent", poll(o -> SendMessageThread.finishedCount.get() >= NUMMPS));
             assertEquals(NUMMPS, SendMessageThread.finishedCount.get());
 
-            assertTrue(poll(o -> stats.getInFlightMessageCount() == 0));
+            assertTrue(poll(o -> clusterStats.getInFlightMessageCount() == 0));
 
             final int iter = i;
             assertTrue(poll(o -> NUMMPS * (iter + 1) == dispatcher.messages.size()));
-            assertTrue(poll(o -> NUMMPS * (iter + 1) == stats.getProcessedMessageCount()));
+            assertTrue(poll(o -> NUMMPS * (iter + 1) == clusterStats.getProcessedMessageCount()));
             assertTrue(poll(o -> in.stream().filter(t -> t.isAlive() == true).count() == 0));
-            assertEquals(0, stats.getDiscardedMessageCount());
+            assertEquals(0, nodeStats.getDiscardedMessageCount());
         }
 
-        checkStat(stats);
+        checkStat(clusterStats);
     }
 
     /**
@@ -310,7 +320,7 @@ public class TestContainerLoadHandling {
     public void testMessagesCanQueueWithinLimitsBlocking() throws Exception {
         for (int i = 0; i < NUMRUNS; i++) {
             final int iter = i;
-            final long initialMessagesDispatched = stats.getMessagesDispatched();
+            final long initialMessagesDispatched = clusterStats.getDispatchedMessageCount();
 
             SendMessageThread.startLatch = new CountDownLatch(1); // set up a gate for starting
             SendMessageThread.finishedCount.set(0);
@@ -326,7 +336,7 @@ public class TestContainerLoadHandling {
             SendMessageThread.startLatch.countDown(); // let the messages go.
 
             // NUMMPS messages should be "dispatched"
-            assertTrue(poll(o -> (stats.getMessagesDispatched() - initialMessagesDispatched) == NUMMPS));
+            assertTrue(poll(o -> (clusterStats.getDispatchedMessageCount() - initialMessagesDispatched) == NUMMPS));
 
             // all messages should be "in flight"
             assertTrue(poll(o -> container.getMessageWorkingCount() == DUPFACTOR * NUMMPS));
@@ -334,7 +344,7 @@ public class TestContainerLoadHandling {
             Thread.sleep(50);
 
             // NUMMPS messages should STILL be "dispatched"
-            assertTrue(poll(o -> (stats.getMessagesDispatched() - initialMessagesDispatched) == NUMMPS));
+            assertTrue(poll(o -> (clusterStats.getDispatchedMessageCount() - initialMessagesDispatched) == NUMMPS));
 
             commonLongRunningHandler.countDown(); // let the rest of them go
 
@@ -342,13 +352,13 @@ public class TestContainerLoadHandling {
             assertTrue("Timeout waiting on message to be sent", poll(o -> SendMessageThread.finishedCount.get() >= DUPFACTOR * NUMMPS));
             assertEquals(DUPFACTOR * NUMMPS, SendMessageThread.finishedCount.get());
 
-            assertTrue(poll(o -> stats.getInFlightMessageCount() == 0));
+            assertTrue(poll(o -> clusterStats.getInFlightMessageCount() == 0));
 
             assertTrue(poll(o -> DUPFACTOR * NUMMPS * (iter + 1) == dispatcher.messages.size()));
-            assertTrue(poll(o -> DUPFACTOR * NUMMPS * (iter + 1) == stats.getProcessedMessageCount()));
+            assertTrue(poll(o -> DUPFACTOR * NUMMPS * (iter + 1) == clusterStats.getProcessedMessageCount()));
             assertTrue(poll(o -> in.stream().filter(t -> t.isAlive() == true).count() == 0));
-            assertEquals(0, stats.getDiscardedMessageCount());
-            checkStat(stats);
+            assertEquals(0, nodeStats.getDiscardedMessageCount());
+            checkStat(clusterStats);
         }
     }
 

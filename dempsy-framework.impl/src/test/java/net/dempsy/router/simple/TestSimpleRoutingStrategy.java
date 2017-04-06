@@ -7,6 +7,7 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.Map;
 
 import org.junit.After;
@@ -20,8 +21,10 @@ import net.dempsy.cluster.ClusterInfoSession;
 import net.dempsy.cluster.local.LocalClusterSessionFactory;
 import net.dempsy.config.ClusterId;
 import net.dempsy.messages.KeyedMessageWithType;
-import net.dempsy.monitoring.StatsCollector;
-import net.dempsy.monitoring.basic.BasicStatsCollector;
+import net.dempsy.monitoring.ClusterStatsCollector;
+import net.dempsy.monitoring.NodeStatsCollector;
+import net.dempsy.monitoring.basic.BasicNodeStatsCollector;
+import net.dempsy.monitoring.basic.BasicStatsCollectorFactory;
 import net.dempsy.router.RoutingStrategy;
 import net.dempsy.router.RoutingStrategy.ContainerAddress;
 import net.dempsy.router.RoutingStrategyManager;
@@ -36,6 +39,8 @@ public class TestSimpleRoutingStrategy {
 
     private static Infrastructure makeInfra(final ClusterInfoSession session, final AutoDisposeSingleThreadScheduler sched) {
         return new Infrastructure() {
+            BasicStatsCollectorFactory sFact = new BasicStatsCollectorFactory();
+            BasicNodeStatsCollector nStats = new BasicNodeStatsCollector();
 
             @Override
             public ClusterInfoSession getCollaborator() {
@@ -53,13 +58,18 @@ public class TestSimpleRoutingStrategy {
             }
 
             @Override
-            public StatsCollector getStatsCollector() {
-                return new BasicStatsCollector();
+            public ClusterStatsCollector getClusterStatsCollector(final ClusterId clusterId) {
+                return sFact.createStatsCollector(clusterId, null);
             }
 
             @Override
             public Map<String, String> getConfiguration() {
-                return null;
+                return new HashMap<>();
+            }
+
+            @Override
+            public NodeStatsCollector getNodeStatsCollector() {
+                return nStats;
             }
         };
     }

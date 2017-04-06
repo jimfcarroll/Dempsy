@@ -1,9 +1,9 @@
-package net.dempsy.monitoring;
+package net.dempsy.monitoring.dummy;
 
-public class DummyStatsCollector implements StatsCollector {
+import net.dempsy.monitoring.ClusterStatsCollector;
+import net.dempsy.monitoring.StatsCollector.TimerContext;
 
-    @Override
-    public void messageReceived(final Object message) {}
+public class DummyClusterStatsCollector implements ClusterStatsCollector {
 
     @Override
     public void messageDispatched(final Object message) {}
@@ -15,22 +15,7 @@ public class DummyStatsCollector implements StatsCollector {
     public void messageFailed(final boolean mpFailure) {}
 
     @Override
-    public void messageSent(final Object message) {}
-
-    @Override
-    public void messageNotSent() {}
-
-    @Override
-    public void messageDiscarded(final Object message) {}
-
-    @Override
     public void messageCollision(final Object message) {}
-
-    @Override
-    public void setMessagesPendingGauge(final Gauge currentMessagesPendingGauge) {}
-
-    @Override
-    public void setMessagesOutPendingGauge(final Gauge currentMessagesOutPendingGauge) {}
 
     @Override
     public void messageProcessorCreated(final Object key) {}
@@ -43,11 +28,6 @@ public class DummyStatsCollector implements StatsCollector {
 
     @Override
     public TimerContext preInstantiationStarted() {
-        return () -> {};
-    }
-
-    @Override
-    public TimerContext handleMessageStarted() {
         return () -> {};
     }
 

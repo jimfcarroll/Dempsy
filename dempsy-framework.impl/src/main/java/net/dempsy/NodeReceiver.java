@@ -6,7 +6,7 @@ import java.util.List;
 import net.dempsy.Router.RoutedMessage;
 import net.dempsy.container.Container;
 import net.dempsy.messages.KeyedMessage;
-import net.dempsy.monitoring.StatsCollector;
+import net.dempsy.monitoring.NodeStatsCollector;
 import net.dempsy.threading.ThreadingModel;
 import net.dempsy.transport.Listener;
 import net.dempsy.transport.MessageTransportException;
@@ -15,9 +15,9 @@ public class NodeReceiver implements Listener<RoutedMessage> {
 
     private final Container[] containers;
     private final ThreadingModel threadModel;
-    private final StatsCollector statsCollector;
+    private final NodeStatsCollector statsCollector;
 
-    public NodeReceiver(final List<Container> nodeContainers, final ThreadingModel threadModel, final StatsCollector statsCollector) {
+    public NodeReceiver(final List<Container> nodeContainers, final ThreadingModel threadModel, final NodeStatsCollector statsCollector) {
         containers = nodeContainers.toArray(new Container[nodeContainers.size()]);
         this.threadModel = threadModel;
         this.statsCollector = statsCollector;

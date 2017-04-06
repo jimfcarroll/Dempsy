@@ -18,7 +18,8 @@ package net.dempsy.monitoring.basic;
 
 import java.util.concurrent.atomic.AtomicLong;
 
-import net.dempsy.container.MetricGetters;
+import net.dempsy.container.ClusterMetricGetters;
+import net.dempsy.monitoring.ClusterStatsCollector;
 import net.dempsy.monitoring.StatsCollector;
 
 /**
@@ -27,30 +28,19 @@ import net.dempsy.monitoring.StatsCollector;
  * implementation does, but useful for testing.
  *
  */
-public class BasicStatsCollector implements StatsCollector, MetricGetters {
-    private final AtomicLong messagesReceived = new AtomicLong();
-    private final AtomicLong messagesDiscarded = new AtomicLong();
+public class BasicClusterStatsCollector implements ClusterStatsCollector, ClusterMetricGetters {
     private final AtomicLong messagesCollisions = new AtomicLong();
     private final AtomicLong messagesDispatched = new AtomicLong();
     private final AtomicLong messagesProcessed = new AtomicLong();
     private final AtomicLong messagesFailed = new AtomicLong();
-    private final AtomicLong messagesSent = new AtomicLong();
-    private final AtomicLong messagesUnsent = new AtomicLong();
     private final AtomicLong inProcessMessages = new AtomicLong();
     private final AtomicLong numberOfMPs = new AtomicLong();
     private final AtomicLong mpsCreated = new AtomicLong();
     private final AtomicLong mpsDeleted = new AtomicLong();
 
     private final AtomicLong preInstantiationDuration = new AtomicLong();
-    private final AtomicLong mpHandleMessageDuration = new AtomicLong();
     private final AtomicLong outputInvokeDuration = new AtomicLong();
     private final AtomicLong evictionPassDuration = new AtomicLong();
-
-    private final AtomicLong bytesReceived = new AtomicLong();
-    private final AtomicLong bytesSent = new AtomicLong();
-
-    private Gauge currentMessagesPendingGauge = null;
-    private Gauge currentMessagesOutPendingGauge = null;
 
     private static class BasicTimerContext implements StatsCollector.TimerContext {
         private final long startTime = System.currentTimeMillis();
@@ -64,11 +54,6 @@ public class BasicStatsCollector implements StatsCollector, MetricGetters {
         public void stop() {
             toIncrement.addAndGet(System.currentTimeMillis() - startTime);
         }
-    }
-
-    @Override
-    public long getDiscardedMessageCount() {
-        return messagesDiscarded.longValue();
     }
 
     @Override
@@ -87,11 +72,6 @@ public class BasicStatsCollector implements StatsCollector, MetricGetters {
     }
 
     @Override
-    public long getMessagesDispatched() {
-        return messagesDispatched.get();
-    }
-
-    @Override
     public long getMessageFailedCount() {
         return messagesFailed.longValue();
     }
@@ -99,11 +79,6 @@ public class BasicStatsCollector implements StatsCollector, MetricGetters {
     @Override
     public long getProcessedMessageCount() {
         return messagesProcessed.longValue();
-    }
-
-    @Override
-    public void messageDiscarded(final Object message) {
-        messagesDiscarded.incrementAndGet();
     }
 
     @Override
@@ -121,11 +96,6 @@ public class BasicStatsCollector implements StatsCollector, MetricGetters {
     public void messageFailed(final boolean mpFailure) {
         messagesFailed.incrementAndGet();
         inProcessMessages.decrementAndGet();
-    }
-
-    @Override
-    public void messageNotSent() {
-        messagesUnsent.incrementAndGet();
     }
 
     @Override
@@ -147,16 +117,6 @@ public class BasicStatsCollector implements StatsCollector, MetricGetters {
     }
 
     @Override
-    public void messageReceived(final Object message) {
-        messagesReceived.incrementAndGet();
-    }
-
-    @Override
-    public void messageSent(final Object message) {
-        messagesSent.incrementAndGet();
-    }
-
-    @Override
     public void stop() {
         // no-op
 
@@ -170,11 +130,6 @@ public class BasicStatsCollector implements StatsCollector, MetricGetters {
     @Override
     public StatsCollector.TimerContext preInstantiationStarted() {
         return new BasicTimerContext(preInstantiationDuration);
-    }
-
-    @Override
-    public StatsCollector.TimerContext handleMessageStarted() {
-        return new BasicTimerContext(mpHandleMessageDuration);
     }
 
     @Override
@@ -198,21 +153,6 @@ public class BasicStatsCollector implements StatsCollector, MetricGetters {
     }
 
     @Override
-    public long getMessagesNotSentCount() {
-        return messagesUnsent.get();
-    }
-
-    @Override
-    public long getMessagesSentCount() {
-        return messagesSent.get();
-    }
-
-    @Override
-    public long getMessagesReceivedCount() {
-        return messagesReceived.get();
-    }
-
-    @Override
     public long getMessageProcessorsCreated() {
         return mpsCreated.get();
     }
@@ -220,36 +160,6 @@ public class BasicStatsCollector implements StatsCollector, MetricGetters {
     @Override
     public long getMessageProcessorCount() {
         return numberOfMPs.get();
-    }
-
-    @Override
-    public long getMessageBytesSent() {
-        return bytesSent.get();
-    }
-
-    @Override
-    public long getMessageBytesReceived() {
-        return bytesReceived.get();
-    }
-
-    @Override
-    public synchronized void setMessagesPendingGauge(final Gauge currentMessagesPendingGauge) {
-        this.currentMessagesPendingGauge = currentMessagesPendingGauge;
-    }
-
-    @Override
-    public synchronized void setMessagesOutPendingGauge(final Gauge currentMessagesOutPendingGauge) {
-        this.currentMessagesOutPendingGauge = currentMessagesOutPendingGauge;
-    }
-
-    @Override
-    public synchronized long getMessagesPending() {
-        return currentMessagesPendingGauge == null ? 0 : currentMessagesPendingGauge.value();
-    }
-
-    @Override
-    public synchronized long getMessagesOutPending() {
-        return currentMessagesOutPendingGauge == null ? 0 : currentMessagesOutPendingGauge.value();
     }
 
 }

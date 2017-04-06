@@ -19,7 +19,7 @@ package net.dempsy.transport.blockingqueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-import net.dempsy.monitoring.StatsCollector;
+import net.dempsy.monitoring.NodeStatsCollector;
 import net.dempsy.transport.MessageTransportException;
 import net.dempsy.transport.Sender;
 
@@ -35,7 +35,7 @@ import net.dempsy.transport.Sender;
 public class BlockingQueueSender implements Sender {
 
     private final BlockingQueue<Object> queue;
-    private final StatsCollector statsCollector;
+    private final NodeStatsCollector statsCollector;
     private final boolean blocking;
     private final AtomicBoolean shutdown = new AtomicBoolean(false);
 
@@ -56,7 +56,7 @@ public class BlockingQueueSender implements Sender {
      * @param blocking
      *            is whether or not to set this queue to blocking. It can be changed after a queue is started but there is no synchronization around the checking in the send method.
      */
-    public BlockingQueueSender(final BlockingQueue<Object> queue, final boolean blocking, final StatsCollector statsCollector) {
+    public BlockingQueueSender(final BlockingQueue<Object> queue, final boolean blocking, final NodeStatsCollector statsCollector) {
         this.statsCollector = statsCollector;
         this.queue = queue;
         this.blocking = blocking;

@@ -67,7 +67,8 @@ import net.dempsy.lifecycle.annotation.Start;
 import net.dempsy.lifecycle.annotation.utils.KeyExtractor;
 import net.dempsy.messages.Adaptor;
 import net.dempsy.messages.Dispatcher;
-import net.dempsy.monitoring.StatsCollector;
+import net.dempsy.monitoring.ClusterStatsCollector;
+import net.dempsy.monitoring.basic.BasicNodeStatsCollector;
 import net.dempsy.transport.blockingqueue.BlockingQueueReceiver;
 import net.dempsy.utils.test.SystemPropertyManager;
 
@@ -98,7 +99,7 @@ public class TestContainer {
     private ClassPathXmlApplicationContext context = null;
     private NodeManager manager;
     private LocalClusterSessionFactory sessionFactory = null;
-    private StatsCollector statsCollector;
+    private ClusterStatsCollector statsCollector;
 
     private final List<AutoCloseable> toClose = new ArrayList<>();
     private final String containerId;
@@ -122,7 +123,7 @@ public class TestContainer {
         sessionFactory = new LocalClusterSessionFactory();
         final Node node = context.getBean(Node.class);
         manager = track(new NodeManager()).node(node).collaborator(track(sessionFactory.createSession())).start();
-        statsCollector = (StatsCollector) node.getStatsCollector();
+        statsCollector = manager.getClusterStatsCollector(new ClusterId("test-app", "test-cluster"));
         container = manager.getContainers().get(0);
         assertTrue(poll(manager, m -> m.isReady()));
     }
@@ -158,7 +159,7 @@ public class TestContainer {
         // =======================================================
         // configure an output catcher tier
         final Node out = new Node("test-app").defaultRoutingStrategyId("net.dempsy.router.simple")
-                .receiver(new BlockingQueueReceiver(new ArrayBlockingQueue<>(16))); // same app as the spring file.
+                .receiver(new BlockingQueueReceiver(new ArrayBlockingQueue<>(16))).setNodeStatsCollector(new BasicNodeStatsCollector()); // same app as the spring file.
         out.cluster("output-catch").mp(new MessageProcessor<OutputCatcher>(new OutputCatcher()));
         out.validate();
 
@@ -575,7 +576,7 @@ public class TestContainer {
         Thread.sleep(500); // let it get going.
         assertFalse(evictIsComplete.get()); // check to see we're hung.
 
-        final MetricGetters sc = (MetricGetters) statsCollector;
+        final ClusterMetricGetters sc = (ClusterMetricGetters) statsCollector;
         assertEquals(0, sc.getMessageCollisionCount());
 
         // sending it a message will now cause it to have the collision tick up

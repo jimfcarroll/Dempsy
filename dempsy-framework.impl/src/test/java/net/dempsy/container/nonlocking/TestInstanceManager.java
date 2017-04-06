@@ -20,6 +20,7 @@ import static org.junit.Assert.assertEquals;
 
 import java.lang.reflect.InvocationTargetException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -28,9 +29,9 @@ import org.junit.Test;
 import net.dempsy.Infrastructure;
 import net.dempsy.cluster.ClusterInfoSession;
 import net.dempsy.config.ClusterId;
+import net.dempsy.container.ClusterMetricGetters;
 import net.dempsy.container.Container;
 import net.dempsy.container.ContainerException;
-import net.dempsy.container.MetricGetters;
 import net.dempsy.lifecycle.annotation.Activation;
 import net.dempsy.lifecycle.annotation.MessageHandler;
 import net.dempsy.lifecycle.annotation.MessageKey;
@@ -42,8 +43,10 @@ import net.dempsy.lifecycle.annotation.utils.KeyExtractor;
 import net.dempsy.messages.Dispatcher;
 import net.dempsy.messages.KeyedMessageWithType;
 import net.dempsy.messages.MessageProcessorLifecycle;
-import net.dempsy.monitoring.StatsCollector;
-import net.dempsy.monitoring.basic.BasicStatsCollector;
+import net.dempsy.monitoring.ClusterStatsCollector;
+import net.dempsy.monitoring.NodeStatsCollector;
+import net.dempsy.monitoring.basic.BasicClusterStatsCollector;
+import net.dempsy.monitoring.basic.BasicNodeStatsCollector;
 import net.dempsy.util.executor.AutoDisposeSingleThreadScheduler;
 
 public class TestInstanceManager {
@@ -233,20 +236,31 @@ public class TestInstanceManager {
     // ----------------------------------------------------------------------------
 
     DummyDispatcher dispatcher;
-    StatsCollector statsCollector;
+    BasicClusterStatsCollector statsCollector;
 
     @SuppressWarnings("resource")
     public Container setupContainer(final MessageProcessorLifecycle<?> prototype) throws ContainerException {
         dispatcher = new DummyDispatcher();
-        statsCollector = new BasicStatsCollector();
+        statsCollector = new BasicClusterStatsCollector();
 
         manager = new NonLockingContainer().setMessageProcessor(prototype).setClusterId(new ClusterId("test", "test"));
         manager.setDispatcher(dispatcher);
         manager.start(new Infrastructure() {
+            BasicNodeStatsCollector nStats = new BasicNodeStatsCollector();
 
             @Override
-            public StatsCollector getStatsCollector() {
+            public ClusterStatsCollector getClusterStatsCollector(final ClusterId clusterId) {
                 return statsCollector;
+            }
+
+            @Override
+            public Map<String, String> getConfiguration() {
+                return new HashMap<>();
+            }
+
+            @Override
+            public NodeStatsCollector getNodeStatsCollector() {
+                return nStats;
             }
 
             @Override
@@ -261,11 +275,6 @@ public class TestInstanceManager {
 
             @Override
             public ClusterInfoSession getCollaborator() {
-                return null;
-            }
-
-            @Override
-            public Map<String, String> getConfiguration() {
                 return null;
             }
         });
@@ -287,7 +296,7 @@ public class TestInstanceManager {
 
             manager.outputPass();
             assertEquals("number of processed messages should include outputs.", 4,
-                    ((MetricGetters) statsCollector).getProcessedMessageCount());
+                    ((ClusterMetricGetters) statsCollector).getProcessedMessageCount());
         }
     }
 
@@ -307,7 +316,7 @@ public class TestInstanceManager {
         manager.outputPass();
         // output messages are NOT considered "processed" if there is no output method on the MP.
         assertEquals("number of processed messages should include outputs.", 2,
-                ((MetricGetters) statsCollector).getProcessedMessageCount());
+                ((ClusterMetricGetters) statsCollector).getProcessedMessageCount());
     }
 
     @Mp
@@ -329,7 +338,7 @@ public class TestInstanceManager {
 
             dispatcher.dispatch(km(new MessageOne(123)), true);
 
-            assertEquals(1, ((MetricGetters) statsCollector).getMessageFailedCount());
+            assertEquals(1, ((ClusterMetricGetters) statsCollector).getMessageFailedCount());
         }
     }
 }

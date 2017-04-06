@@ -46,6 +46,7 @@ import net.dempsy.container.ContainerException;
 import net.dempsy.messages.KeyedMessage;
 import net.dempsy.messages.KeyedMessageWithType;
 import net.dempsy.messages.MessageProcessorLifecycle;
+import net.dempsy.monitoring.ClusterStatsCollector;
 import net.dempsy.monitoring.StatsCollector;
 import net.dempsy.util.SafeString;
 import net.dempsy.util.StupidHashMap;
@@ -61,7 +62,7 @@ import net.dempsy.util.StupidHashMap;
 public class NonLockingAltContainer extends Container {
     private final Logger LOGGER = LoggerFactory.getLogger(getClass());
     private static final int SPIN_TRIES = 100;
-    private StatsCollector statCollector;
+    private ClusterStatsCollector statCollector;
 
     // message key -> instance that handles messages with this key
     // changes to this map will be synchronized; read-only may be concurrent
@@ -105,7 +106,7 @@ public class NonLockingAltContainer extends Container {
 
     @Override
     public void start(final Infrastructure infra) {
-        statCollector = infra.getStatsCollector();
+        statCollector = infra.getClusterStatsCollector(clusterId);
 
         validate();
 

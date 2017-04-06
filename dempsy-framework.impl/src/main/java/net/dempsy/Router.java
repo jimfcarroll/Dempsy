@@ -20,7 +20,7 @@ import net.dempsy.cluster.ClusterInfoSession;
 import net.dempsy.config.ClusterId;
 import net.dempsy.messages.Dispatcher;
 import net.dempsy.messages.KeyedMessageWithType;
-import net.dempsy.monitoring.StatsCollector;
+import net.dempsy.monitoring.NodeStatsCollector;
 import net.dempsy.router.RoutingStrategy;
 import net.dempsy.router.RoutingStrategy.ContainerAddress;
 import net.dempsy.router.RoutingStrategyManager;
@@ -43,7 +43,7 @@ public class Router extends Dispatcher implements Service {
     private final TransportManager tmanager;
     private final NodeReceiver nodeReciever;
     private final AtomicBoolean isReady = new AtomicBoolean(false);
-    private final StatsCollector statsCollector;
+    private final NodeStatsCollector statsCollector;
 
     private static class ApplicationState {
         public final Map<String, RoutingStrategy.Router> outboundByClusterName = new HashMap<>();
@@ -53,7 +53,7 @@ public class Router extends Dispatcher implements Service {
     }
 
     public Router(final RoutingStrategyManager manager, final NodeAddress thisNode, final NodeReceiver nodeReciever,
-            final TransportManager tmanager, final StatsCollector statsCollector) {
+            final TransportManager tmanager, final NodeStatsCollector statsCollector) {
         this.manager = manager;
         this.thisNode = thisNode;
         this.tmanager = tmanager;
