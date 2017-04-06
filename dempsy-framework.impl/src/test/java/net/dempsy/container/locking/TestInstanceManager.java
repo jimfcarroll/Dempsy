@@ -24,6 +24,7 @@ import static org.junit.Assert.assertTrue;
 import java.lang.reflect.InvocationTargetException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import org.junit.Test;
 
@@ -264,6 +265,11 @@ public class TestInstanceManager {
 
             @Override
             public ClusterInfoSession getCollaborator() {
+                return null;
+            }
+
+            @Override
+            public Map<String, String> getConfiguration() {
                 return null;
             }
         });

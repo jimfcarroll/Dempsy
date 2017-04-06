@@ -91,7 +91,7 @@ public class DefaultThreadingModel implements ThreadingModel {
         return (int) maxNumWaitingLimitedTasks;
     }
 
-    public DefaultThreadingModel setMaxNumberOfQueuedLimitedTasks(final int maxNumWaitingLimitedTasks) {
+    public DefaultThreadingModel setMaxNumberOfQueuedLimitedTasks(final long maxNumWaitingLimitedTasks) {
         this.maxNumWaitingLimitedTasks = maxNumWaitingLimitedTasks;
         return this;
     }
@@ -132,12 +132,15 @@ public class DefaultThreadingModel implements ThreadingModel {
     }
 
     @Override
-    public <V> Future<V> submitLimited(final Rejectable<V> r) {
+    public <V> Future<V> submitLimited(final Rejectable<V> r, final boolean count) {
         final Callable<V> task = new Callable<V>() {
             Rejectable<V> o = r;
 
             @Override
             public V call() throws Exception {
+                if (!count)
+                    return o.call();
+
                 final long num = numLimited.decrementAndGet();
                 if (num <= maxNumWaitingLimitedTasks)
                     return o.call();
@@ -146,7 +149,8 @@ public class DefaultThreadingModel implements ThreadingModel {
             }
         };
 
-        numLimited.incrementAndGet();
+        if (count)
+            numLimited.incrementAndGet();
 
         final Future<V> ret = executor.submit(task);
         return ret;

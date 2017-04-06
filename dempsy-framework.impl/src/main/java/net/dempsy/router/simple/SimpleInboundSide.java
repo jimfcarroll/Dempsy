@@ -95,4 +95,9 @@ public class SimpleInboundSide implements RoutingStrategy.Inbound {
         return actualDir;
     }
 
+    @Override
+    public boolean doesMessageKeyBelongToNode(final Object messageKey) {
+        return true; // there can be only one
+    }
+
 }

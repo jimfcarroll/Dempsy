@@ -7,6 +7,7 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 import java.util.Collection;
+import java.util.Map;
 
 import org.junit.After;
 import org.junit.Before;
@@ -54,6 +55,11 @@ public class TestSimpleRoutingStrategy {
             @Override
             public StatsCollector getStatsCollector() {
                 return new BasicStatsCollector();
+            }
+
+            @Override
+            public Map<String, String> getConfiguration() {
+                return null;
             }
         };
     }
@@ -131,7 +137,7 @@ public class TestSimpleRoutingStrategy {
 
             try (final RoutingStrategyManager obman = new RoutingStrategyManager();
                     final RoutingStrategy.Factory obf = obman.getAssociatedInstance(SimpleRoutingStrategy.class.getPackage().getName());
-                    RoutingStrategy.Outbound ob = obf.getStrategy(cid)) {
+                    RoutingStrategy.Router ob = obf.getStrategy(cid)) {
 
                 try (final ClusterInfoSession ses2 = sessFact.createSession()) {
                     ob.start(makeInfra(ses2, sched));

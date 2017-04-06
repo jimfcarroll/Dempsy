@@ -19,7 +19,7 @@ import net.dempsy.utils.PersistentTask;
 /**
  * This simple strategy expects at most a single node to implement any given message.
  */
-public class SimpleRoutingStrategy implements RoutingStrategy.Outbound {
+public class SimpleRoutingStrategy implements RoutingStrategy.Router {
     private static final Logger LOGGER = LoggerFactory.getLogger(SimpleRoutingStrategy.class);
     private static final long RETRY_TIMEOUT = 500L;
 

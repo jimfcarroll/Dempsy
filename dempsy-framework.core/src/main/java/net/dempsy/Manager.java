@@ -31,7 +31,7 @@ public class Manager<T> {
                         + " associated with the id \"{}\" wasn't already registered. Attempting to create one assuming the id is a package name",
                         typeId);
                 // try something stupid like assume it's a package name and the sender factory is in that package
-                final Reflections reflections = new Reflections(typeId);
+                final Reflections reflections = new Reflections(typeId + ".");
 
                 final Set<Class<? extends T>> senderFactoryClasses = reflections.getSubTypesOf(clazz);
 

@@ -20,9 +20,9 @@ import net.dempsy.cluster.ClusterInfoSession;
 import net.dempsy.config.ClusterId;
 import net.dempsy.messages.Dispatcher;
 import net.dempsy.messages.KeyedMessageWithType;
+import net.dempsy.monitoring.StatsCollector;
 import net.dempsy.router.RoutingStrategy;
 import net.dempsy.router.RoutingStrategy.ContainerAddress;
-import net.dempsy.router.RoutingStrategy.Outbound;
 import net.dempsy.router.RoutingStrategyManager;
 import net.dempsy.transport.NodeAddress;
 import net.dempsy.transport.SenderFactory;
@@ -43,20 +43,22 @@ public class Router extends Dispatcher implements Service {
     private final TransportManager tmanager;
     private final NodeReceiver nodeReciever;
     private final AtomicBoolean isReady = new AtomicBoolean(false);
+    private final StatsCollector statsCollector;
 
     private static class ApplicationState {
-        public final Map<String, Outbound> outboundByClusterName = new HashMap<>();
+        public final Map<String, RoutingStrategy.Router> outboundByClusterName = new HashMap<>();
         public final Map<String, List<String>> clusterNameByMessageType = new HashMap<>();
         public final Map<String, SenderFactory> senderByTypeId = new HashMap<>();
         public final Map<NodeAddress, SenderFactory> senderByNode = new HashMap<>();
     }
 
     public Router(final RoutingStrategyManager manager, final NodeAddress thisNode, final NodeReceiver nodeReciever,
-            final TransportManager tmanager) {
+            final TransportManager tmanager, final StatsCollector statsCollector) {
         this.manager = manager;
         this.thisNode = thisNode;
         this.tmanager = tmanager;
         this.nodeReciever = nodeReciever;
+        this.statsCollector = statsCollector;
     }
 
     @Override
@@ -70,20 +72,20 @@ public class Router extends Dispatcher implements Service {
             return;
         }
         final Map<String, List<String>> clusterNameByMessageType = cur.clusterNameByMessageType;
-        final Map<String, Outbound> outboundByClusterName = cur.outboundByClusterName;
+        final Map<String, RoutingStrategy.Router> outboundByClusterName = cur.outboundByClusterName;
         final Set<String> uniqueClusters = new HashSet<>();
 
         Arrays.stream(message.messageTypes).forEach(mt -> {
             final List<String> clusterNames = clusterNameByMessageType.get(mt);
             if (clusterNames == null)
-                LOGGER.info("No cluster that handles messages of type " + mt);
+                LOGGER.trace("No cluster that handles messages of type {}", mt);
             else
                 uniqueClusters.addAll(clusterNames);
         });
 
         final Map<NodeAddress, ContainerAddress> containerByNodeAddress = new HashMap<>();
         uniqueClusters.forEach(cn -> {
-            final Outbound ob = outboundByClusterName.get(cn);
+            final RoutingStrategy.Router ob = outboundByClusterName.get(cn);
             final ContainerAddress ca = ob.selectDestinationForMessage(message);
             // it's possible ca is null
             if (ca == null)
@@ -157,6 +159,7 @@ public class Router extends Dispatcher implements Service {
                             SenderFactory sf = newOutbounds.senderByTypeId.get(ni.transportTypeId);
                             if (sf == null) {
                                 sf = tmanager.getAssociatedInstance(ni.transportTypeId);
+                                sf.setStatsCollector(statsCollector);
                                 newOutbounds.senderByTypeId.put(ni.transportTypeId, sf);
                             }
                             newOutbounds.senderByNode.put(ni.nodeAddress, sf);
@@ -185,7 +188,7 @@ public class Router extends Dispatcher implements Service {
                             known.put(ci.clusterId, ci);
 
                             final RoutingStrategy.Factory obfactory = manager.getAssociatedInstance(ci.routingStrategyTypeId);
-                            final Outbound ob = obfactory.getStrategy(ci.clusterId);
+                            final RoutingStrategy.Router ob = obfactory.getStrategy(ci.clusterId);
 
                             final String clusterName = ci.clusterId.clusterName;
 
@@ -232,7 +235,7 @@ public class Router extends Dispatcher implements Service {
             final ApplicationState obs = outbounds.get();
             if (obs == null)
                 return false;
-            for (final Outbound ob : obs.outboundByClusterName.values()) {
+            for (final RoutingStrategy.Router ob : obs.outboundByClusterName.values()) {
                 if (!ob.isReady())
                     return false;
             }
@@ -258,7 +261,7 @@ public class Router extends Dispatcher implements Service {
         final ApplicationState cur = outbounds.get();
         if (cur == null)
             return false;
-        final Outbound ob = cur.outboundByClusterName.get(cluterName);
+        final RoutingStrategy.Router ob = cur.outboundByClusterName.get(cluterName);
         if (ob == null)
             return false;
         final ContainerAddress ca = ob.selectDestinationForMessage(message);

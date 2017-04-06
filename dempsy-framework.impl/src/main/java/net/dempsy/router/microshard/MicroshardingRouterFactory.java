@@ -1,4 +1,4 @@
-package net.dempsy.router.simple;
+package net.dempsy.router.microshard;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -11,10 +11,10 @@ import net.dempsy.config.ClusterId;
 import net.dempsy.router.RoutingStrategy;
 import net.dempsy.router.RoutingStrategy.Router;
 
-public class SimpleRoutingStrategyFactory implements RoutingStrategy.Factory {
-    private static final Logger LOGGER = LoggerFactory.getLogger(SimpleRoutingStrategyFactory.class);
+public class MicroshardingRouterFactory implements RoutingStrategy.Factory {
+    private static final Logger LOGGER = LoggerFactory.getLogger(MicroshardingRouterFactory.class);
 
-    private final Map<String, SimpleRoutingStrategy> cache = new HashMap<>();
+    private final Map<String, MicroshardingRouter> cache = new HashMap<>();
 
     @Override
     public void start(final Infrastructure infra) {}
@@ -33,7 +33,7 @@ public class SimpleRoutingStrategyFactory implements RoutingStrategy.Factory {
 
     @Override
     public synchronized Router getStrategy(final ClusterId clusterId) {
-        final SimpleRoutingStrategy ret = new SimpleRoutingStrategy();
+        final MicroshardingRouter ret = new MicroshardingRouter();
         ret.setClusterId(clusterId);
         return ret;
     }

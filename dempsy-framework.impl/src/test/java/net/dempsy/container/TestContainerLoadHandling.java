@@ -26,6 +26,7 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -132,6 +133,11 @@ public class TestContainerLoadHandling {
 
             @Override
             public ClusterInfoSession getCollaborator() {
+                return null;
+            }
+
+            @Override
+            public Map<String, String> getConfiguration() {
                 return null;
             }
         });

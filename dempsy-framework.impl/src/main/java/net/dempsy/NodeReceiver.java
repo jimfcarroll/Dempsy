@@ -26,16 +26,22 @@ public class NodeReceiver implements Listener<RoutedMessage> {
     @Override
     public boolean onMessage(final RoutedMessage message) throws MessageTransportException {
         // TODO: consider if blocking should be configurable by cluster? node? etc.
-        Arrays.stream(message.containers).forEach(container -> containers[container].dispatch(new KeyedMessage(message.key, message.message), true));
+        statsCollector.messageReceived(message);
+        feedbackLoop(message);
         return true;
     }
 
+    private void doIt(final RoutedMessage message) {
+        Arrays.stream(message.containers).forEach(container -> containers[container].dispatch(new KeyedMessage(message.key, message.message), true));
+    }
+
     public void feedbackLoop(final RoutedMessage message) {
+        // onMessage(message);
         threadModel.submitLimited(new ThreadingModel.Rejectable<Object>() {
 
             @Override
             public Object call() throws Exception {
-                onMessage(message);
+                doIt(message);
                 return null;
             }
 
@@ -43,7 +49,7 @@ public class NodeReceiver implements Listener<RoutedMessage> {
             public void rejected() {
                 statsCollector.messageDiscarded(message);
             }
-        });
+        }, false);
     }
 
 }

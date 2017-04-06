@@ -48,10 +48,10 @@ public interface RoutingStrategy {
     }
 
     public static interface Factory extends Service {
-        public Outbound getStrategy(ClusterId clusterId);
+        public Router getStrategy(ClusterId clusterId);
     }
 
-    public static interface Outbound extends Service {
+    public static interface Router extends Service {
         public void setClusterId(ClusterId clusterId);
 
         public ContainerAddress selectDestinationForMessage(KeyedMessageWithType message);
@@ -59,6 +59,13 @@ public interface RoutingStrategy {
 
     public static interface Inbound extends Service {
         public void setContainerDetails(ClusterId clusterId, ContainerAddress address);
+
+        /**
+         * Since the {@link Inbound} has the responsibility to determine which instances of a 
+         * MessageProcessors are valid in 'this' node, it should be able to provide that
+         * information through the implementation of this method. 
+         */
+        public boolean doesMessageKeyBelongToNode(Object messageKey);
 
         public default String routingStrategyTypeId() {
             return this.getClass().getPackage().getName();

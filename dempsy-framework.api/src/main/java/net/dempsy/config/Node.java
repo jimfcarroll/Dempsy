@@ -3,9 +3,14 @@ package net.dempsy.config;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import net.dempsy.util.SafeString;
 
@@ -13,6 +18,7 @@ import net.dempsy.util.SafeString;
  * This class is a builder for the
  */
 public class Node {
+    private static final Logger LOGGER = LoggerFactory.getLogger(Node.class);
     private static final String DEFAULT_APP = "default";
 
     public final String application;
@@ -22,6 +28,7 @@ public class Node {
     private Object receiver = null;
     private boolean configed = false;
     private String containerTypeId = "net.dempsy.container.nonlocking";
+    private final Map<String, String> configuration = new HashMap<>();
 
     public Node(final String applicationName) {
         if (applicationName == null)
@@ -53,7 +60,16 @@ public class Node {
         return this;
     }
 
-    public Node config() {
+    public Node conf(final String key, final String value) {
+        String oldVal;
+        if ((oldVal = configuration.putIfAbsent(key, value)) != null) {
+            LOGGER.warn("Configuration value for \"" + key + "\" was already set to \"" + oldVal + "\" but is being changed to \"" + value + "\"");
+            configuration.put(key, value);
+        }
+        return this;
+    }
+
+    public Node configure() {
         if (!configed) {
             clusters.forEach(c -> fillout(c));
             configed = true;
@@ -144,8 +160,18 @@ public class Node {
         return containerTypeId;
     }
 
+    public Node setConfiguration(final Map<String, String> conf) {
+        configuration.clear();
+        configuration.putAll(conf);
+        return this;
+    }
+
+    public Map<String, String> getConfiguration() {
+        return configuration;
+    }
+
     public void validate() throws IllegalStateException {
-        config();
+        configure();
 
         if (application == null)
             throw new IllegalStateException("You must set the application name while configuring a Dempsy application.");

@@ -94,7 +94,7 @@ public abstract class PersistentTask implements ClusterInfoWatcher {
 
         } catch (final RuntimeException th) {
             if (logger.isDebugEnabled())
-                logger.debug("Exception while " + this);
+                logger.debug("Exception while " + this, th);
         } finally {
             // if we never got the destinations set up then kick off a retry
             if (recurseAttempt)

@@ -170,7 +170,7 @@ public class NodeManager implements Infrastructure, AutoCloseable {
 
         this.tManager = tr.start(new TransportManager(), this);
         this.rsManager = tr.start(new RoutingStrategyManager(), this);
-        this.router = tr.start(new Router(rsManager, nodeAddress, nodeReciever, tManager), this);
+        this.router = tr.start(new Router(rsManager, nodeAddress, nodeReciever, tManager, statsCollector), this);
 
         // set up containers
         containers.forEach(pc -> pc.container.setDispatcher(router));
@@ -182,7 +182,11 @@ public class NodeManager implements Infrastructure, AutoCloseable {
         adaptors.forEach(a -> a.setDispatcher(router));
 
         // start adaptors
-        adaptors.forEach(a -> tr.track(a).start());
+        adaptors.forEach(a -> {
+            // TODO: carry the name of the clusterid into the thread name.
+            threading.runDaemon(() -> tr.track(a).start(), "Adaptor-");
+
+        });
 
         // IB routing strategy
         IntStream.range(0, containers.size()).forEach(i -> {
@@ -252,6 +256,11 @@ public class NodeManager implements Infrastructure, AutoCloseable {
     @Override
     public StatsCollector getStatsCollector() {
         return statsCollector;
+    }
+
+    @Override
+    public Map<String, String> getConfiguration() {
+        return node.getConfiguration();
     }
 
     // Testing accessors
