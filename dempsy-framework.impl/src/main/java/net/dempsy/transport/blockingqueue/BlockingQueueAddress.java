@@ -16,6 +16,8 @@
 
 package net.dempsy.transport.blockingqueue;
 
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.BlockingQueue;
 
 import net.dempsy.transport.NodeAddress;
@@ -23,22 +25,33 @@ import net.dempsy.transport.NodeAddress;
 public class BlockingQueueAddress implements NodeAddress {
     private static final long serialVersionUID = 1L;
 
-    protected final BlockingQueue<Object> queue;
+    protected static final Map<String, BlockingQueue<Object>> queues = new HashMap<>();
+
     protected final String guid;
 
+    @SuppressWarnings("unused")
+    private BlockingQueueAddress() {
+        guid = null;
+    }
+
     public BlockingQueueAddress(final BlockingQueue<Object> queue, final String guid) {
-        this.queue = queue;
         this.guid = guid;
+
+        synchronized (queues) {
+            if (queues.containsKey(guid))
+                throw new IllegalStateException("Queue " + guid + " already created.");
+            queues.put(guid, queue);
+        }
     }
 
     @Override
     public int hashCode() {
-        return queue.hashCode();
+        return guid.hashCode();
     }
 
     @Override
     public boolean equals(final Object other) {
-        return (other == null || !(other instanceof BlockingQueueAddress)) ? false : queue.equals(((BlockingQueueAddress) other).queue);
+        return (other == null || !(other instanceof BlockingQueueAddress)) ? false : guid.equals(((BlockingQueueAddress) other).guid);
     }
 
     @Override
@@ -49,5 +62,17 @@ public class BlockingQueueAddress implements NodeAddress {
     @Override
     public String getGuid() {
         return guid;
+    }
+
+    public BlockingQueue<Object> getQueue() {
+        synchronized (queues) {
+            return queues.get(guid);
+        }
+    }
+
+    public void close() {
+        synchronized (queues) {
+            queues.remove(guid);
+        }
     }
 }

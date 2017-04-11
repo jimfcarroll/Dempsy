@@ -26,10 +26,16 @@ import net.dempsy.transport.NodeAddress;
 
 public interface RoutingStrategy {
 
-    public static class ContainerAddress implements Serializable {
+    public static final class ContainerAddress implements Serializable {
         private static final long serialVersionUID = 1L;
         public final NodeAddress node;
         public final int[] clusters;
+
+        @SuppressWarnings("unused")
+        private ContainerAddress() {
+            node = null;
+            clusters = null;
+        }
 
         public ContainerAddress(final NodeAddress node, final int cluster) {
             this.node = node;
@@ -43,7 +49,35 @@ public interface RoutingStrategy {
 
         @Override
         public String toString() {
-            return "ContainerAddress [node=" + node + ", clusters=" + Arrays.toString(clusters) + "]";
+            return "ContainerAddress[node=" + node + ", clusters=" + Arrays.toString(clusters) + "]";
+        }
+
+        @Override
+        public int hashCode() {
+            final int prime = 31;
+            int result = 1;
+            result = prime * result + Arrays.hashCode(clusters);
+            result = prime * result + ((node == null) ? 0 : node.hashCode());
+            return result;
+        }
+
+        @Override
+        public boolean equals(final Object obj) {
+            if (this == obj)
+                return true;
+            if (obj == null)
+                return false;
+            if (ContainerAddress.class != obj.getClass()) // can do this for a final class
+                return false;
+            final ContainerAddress other = (ContainerAddress) obj;
+            if (!Arrays.equals(clusters, other.clusters))
+                return false;
+            if (node == null) {
+                if (other.node != null)
+                    return false;
+            } else if (!node.equals(other.node))
+                return false;
+            return true;
         }
     }
 

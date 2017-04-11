@@ -1,5 +1,6 @@
 package net.dempsy;
 
+import java.util.HashSet;
 import java.util.Set;
 
 import net.dempsy.config.ClusterId;
@@ -9,10 +10,17 @@ public class ClusterInformation {
     public final String routingStrategyTypeId;
     public final ClusterId clusterId;
 
+    @SuppressWarnings("unused")
+    private ClusterInformation() {
+        this.routingStrategyTypeId = null;
+        this.clusterId = null;
+        this.messageTypesHandled = null;
+    }
+
     public ClusterInformation(final String routingStrategyTypeId, final ClusterId clusterId, final Set<String> messageTypesHandled) {
         this.routingStrategyTypeId = routingStrategyTypeId;
         this.clusterId = clusterId;
-        this.messageTypesHandled = messageTypesHandled;
+        this.messageTypesHandled = new HashSet<>(messageTypesHandled);
     }
 
     @Override

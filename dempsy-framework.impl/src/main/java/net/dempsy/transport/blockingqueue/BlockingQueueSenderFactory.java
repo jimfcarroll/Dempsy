@@ -34,7 +34,7 @@ public class BlockingQueueSenderFactory implements SenderFactory {
     public synchronized Sender getSender(final NodeAddress destination) throws MessageTransportException {
         BlockingQueueSender blockingQueueSender = senders.get(destination);
         if (blockingQueueSender == null) {
-            blockingQueueSender = new BlockingQueueSender(((BlockingQueueAddress) destination).queue, blocking, statsCollector);
+            blockingQueueSender = new BlockingQueueSender(((BlockingQueueAddress) destination).getQueue(), blocking, statsCollector);
             senders.put(destination, blockingQueueSender);
         }
 

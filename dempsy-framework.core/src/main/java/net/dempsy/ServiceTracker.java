@@ -64,17 +64,17 @@ public class ServiceTracker implements AutoCloseable {
         return true;
     }
 
-    @Override
-    public void close() {
-        stopAll();
-    }
-
     private void add(final AutoCloseable service) {
         if (service != null) {
             synchronized (services) {
                 services.add(service);
             }
         }
+    }
+
+    @Override
+    public void close() throws Exception {
+        stopAll();
     }
 
 }

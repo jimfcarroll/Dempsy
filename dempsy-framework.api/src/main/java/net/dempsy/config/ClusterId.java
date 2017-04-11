@@ -38,6 +38,12 @@ public class ClusterId {
     public final String applicationName;
     public final String clusterName;
 
+    @SuppressWarnings("unused")
+    private ClusterId() {
+        applicationName = null;
+        clusterName = null;
+    }
+
     /**
      * Create a cluster Id from the constituent parts.
      * 
@@ -50,6 +56,8 @@ public class ClusterId {
     public ClusterId(final String applicationName, final String clusterName) {
         this.applicationName = applicationName;
         this.clusterName = clusterName;
+        if ((applicationName != null && applicationName.contains(":")) || (clusterName != null && clusterName.contains(":")))
+            throw new IllegalArgumentException("Neither the application namd not the cluster name can contain a \":\"");
     }
 
     /**
@@ -61,6 +69,22 @@ public class ClusterId {
     public ClusterId(final ClusterId other) {
         this.applicationName = other.applicationName;
         this.clusterName = other.clusterName;
+    }
+
+    /**
+     * This is needed for json
+     * @param serialized
+     */
+    public ClusterId(final String serialized) {
+        final int colon = serialized.indexOf(':');
+        if (colon < 0)
+            throw new IllegalArgumentException("Illegal string representation of a " + ClusterId.class.getSimpleName()
+                    + ". Doesn't contain both an application and a cluster name.");
+        if (colon != serialized.lastIndexOf(':'))
+            throw new IllegalArgumentException(
+                    "Illegal string representation of a " + ClusterId.class.getSimpleName() + ". Contains multiple colons");
+        applicationName = serialized.substring(0, colon);
+        clusterName = serialized.substring(colon + 1);
     }
 
     /**

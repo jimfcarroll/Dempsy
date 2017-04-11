@@ -1,7 +1,7 @@
 package net.dempsy;
 
 import java.io.Serializable;
-import java.util.Collections;
+import java.util.HashMap;
 import java.util.Map;
 
 import net.dempsy.config.ClusterId;
@@ -13,11 +13,18 @@ public class NodeInformation implements Serializable {
     public final NodeAddress nodeAddress;
     public final Map<ClusterId, ClusterInformation> clusterInfoByClusterId;
 
+    @SuppressWarnings("unused")
+    private NodeInformation() {
+        transportTypeId = null;
+        nodeAddress = null;
+        clusterInfoByClusterId = null;
+    }
+
     public NodeInformation(final String transportTypeId, final NodeAddress nodeAddress,
             final Map<ClusterId, ClusterInformation> messageTypesByClusterId) {
         this.transportTypeId = transportTypeId;
         this.nodeAddress = nodeAddress;
-        this.clusterInfoByClusterId = Collections.unmodifiableMap(messageTypesByClusterId);
+        this.clusterInfoByClusterId = new HashMap<>(messageTypesByClusterId);
     }
 
     @Override

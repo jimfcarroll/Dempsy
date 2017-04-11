@@ -20,8 +20,8 @@
   <groupId>com.boundary</groupId>
   <artifactId>high-scale-lib</artifactId>
   <version>1.0.6</version>
-</dependency>
-
+  
+  </dependency>
      <dependency>
        <groupId>org.springframework</groupId>
        <artifactId>spring-context</artifactId>
@@ -45,6 +45,22 @@
      <dependency>
         <groupId>commons-io</groupId>
         <artifactId>commons-io</artifactId>
+        <scope>test</scope>
+     </dependency>
+     <dependency>
+        <groupId>net.dempsy</groupId>
+        <artifactId>dempsy-cluster.zookeeper</artifactId>
+        <type>test-jar</type>
+        <scope>test</scope>
+     </dependency>
+     <dependency>
+        <groupId>net.dempsy</groupId>
+        <artifactId>dempsy-cluster.zookeeper</artifactId>
+        <scope>test</scope>
+     </dependency>
+     <dependency>
+        <groupId>net.dempsy</groupId>
+        <artifactId>dempsy-serialization.jackson</artifactId>
         <scope>test</scope>
      </dependency>
    </dependencies>

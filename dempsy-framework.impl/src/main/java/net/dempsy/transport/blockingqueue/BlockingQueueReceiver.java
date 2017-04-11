@@ -142,6 +142,8 @@ public class BlockingQueueReceiver implements Runnable, Receiver {
                 currentThread.interrupt();
             Thread.yield();
         }
+
+        address.close();
     }
 
     @Override
