@@ -35,53 +35,67 @@ public class MicroshardUtils {
     private static Logger LOGGER = LoggerFactory.getLogger(MicroshardUtils.class);
 
     /**
-    * The ClusterDirectory is a subdirectory of the Application directory. It's named
-    * by the clusterName from the given {@link ClusterId} and it contains an instance
-    * of a {@link MicroShardClusterInformation}. It also serves as the root directory
-    * for the cluster's nodes and shards subdirectories.
+    * The {@code clusterDir} is a subdirectory of the {@code application} directory. 
+    * It's named by the clusterName from the given {@link ClusterId} and it contains
+    * an instance of a {@link MicroShardClusterInformation}. It also serves as the 
+    * root directory for the cluster's nodes and shards subdirectories.
     */
     public final String clusterDir;
 
     /**
-     * This is the directory where shards are managed across the distributed cluster.
+     * The shardsDir is a subdirectory of the {@code clusterDir}. This is the directory 
+     * where shards are managed across the distributed cluster.
      */
     public final String shardsDir;
 
     /**
-    * A subdirectory of the ClusterDir, the nodesDir contains an ephemeral and sequential 
-    * entry (subdirectory) per currently running node. Each of these subdirectories contains
-    * an instance of a {@link DefaultShardInfo} which the manager will use to copy into 
+    * A subdirectory of the @{code clusterDir}, the {@code nodesDir} contains an ephemeral and
+    * sequential entry (subdirectory) per currently running node. Each of these subdirectories
+    * contains an instance of a {@link DefaultShardInfo} which the manager will use to copy into 
     * the appropriate shardsDir subdirectory in order to accomplish an assignment.
     */
     public final String clusterNodesDir;
 
+    /**
+    * A subdirectory of the @{code clusterDir}, the {@code shardTxDirectory} is used to manage
+    * "transactions" on the shards. This is to help prevent the "herd effect" on the zookeeper
+    * server and have repeated updates for every shard that's grabbed. 
+    */
+    public final String shardTxDirectory;
+
     public final ClusterId clusterId;
 
-    public MicroshardUtils(final RootPaths paths, final ClusterId clusterId) {
+    public final ClusterInfo clusterInfo;
+
+    public MicroshardUtils(final RootPaths paths, final ClusterId clusterId, final ClusterInfo clusterInfo) {
         this.clusterDir = paths.clustersDir + "/" + clusterId.clusterName;
         this.shardsDir = clusterDir + "/shards";
         this.clusterNodesDir = clusterDir + "/nodes";
+        this.shardTxDirectory = clusterDir + "/shardTxs";
         this.clusterId = clusterId;
+        this.clusterInfo = clusterInfo;
     }
 
-    public final void mkClusterDir(final ClusterInfoSession session, final Object obj) throws ClusterInfoException {
+    public final void mkClusterDir(final ClusterInfoSession session) throws ClusterInfoException {
         session.recursiveMkdir(clusterDir, DirMode.PERSISTENT);
-        if (obj != null)
-            session.setData(clusterDir, obj);
+        if (clusterInfo != null)
+            session.setData(clusterDir, clusterInfo);
     }
 
-    public final void mkAllDirs(final ClusterInfoSession session, final Object obj) throws ClusterInfoException {
-        mkClusterDir(session, obj);
+    public final void mkAllDirs(final ClusterInfoSession session) throws ClusterInfoException {
+        mkClusterDir(session);
         session.mkdir(shardsDir, null, DirMode.PERSISTENT);
         session.mkdir(clusterNodesDir, null, DirMode.PERSISTENT);
+        session.mkdir(shardTxDirectory, null, DirMode.PERSISTENT);
     }
 
     /**
     * This will get the children of one of the main persistent directories (provided in the path parameter). If
     * the directory doesn't exist it will create all of the persistent directories, but only if the clusterInfo isn't null.
     */
-    Collection<String> persistentGetMainDirSubdirs(final ClusterInfoSession session, final String path, final ClusterInfoWatcher watcher,
-            final ClusterInfo clusterInfo) throws ClusterInfoException {
+    Collection<String> persistentGetMainDirSubdirs(final ClusterInfoSession session, final String path, final ClusterInfoWatcher watcher)
+            throws ClusterInfoException {
+
         Collection<String> shardsFromClusterManager;
         try {
             shardsFromClusterManager = session.getSubdirs(path, watcher);
@@ -90,7 +104,7 @@ public class MicroshardUtils {
             // and shouldn't create extraneous directories. If they are not there, there's
             // nothing we can do.
             if (clusterInfo != null) {
-                mkAllDirs(session, clusterInfo);
+                mkAllDirs(session);
                 shardsFromClusterManager = session.getSubdirs(path, watcher);
             } else
                 shardsFromClusterManager = null;
@@ -103,17 +117,16 @@ public class MicroshardUtils {
     * 
     * @param mapToFill is the map to fill from the ClusterInfo.
     * @param session is the ClusterInfoSession to get retrieve the data from.
-    * @param clusterInfo is the {@link ClusterInfo} for the cluster we're retrieving the shards for.
     * @param watcher, if not null, will be set as the watcher on the shard directory for this cluster.
     * @return the totalAddressCount from each shard. These are supposed to be repeated in each 
     * {@link ShardInfo}.
     */
-    int fillMapFromActiveShards(final Map<Integer, ShardInfo> mapToFill, final ClusterInfoSession session, final ClusterInfo clusterInfo,
-            final ClusterInfoWatcher watcher) throws ClusterInfoException {
+    int fillMapFromActiveShards(final Map<Integer, ShardInfo> mapToFill, final ClusterInfoSession session, final ClusterInfoWatcher watcher)
+            throws ClusterInfoException {
         int totalAddressCounts = -1;
 
         // First get the shards that are in transition.
-        final Collection<String> shardsFromClusterManager = persistentGetMainDirSubdirs(session, shardsDir, watcher, clusterInfo);
+        final Collection<String> shardsFromClusterManager = persistentGetMainDirSubdirs(session, shardsDir, watcher);
 
         if (shardsFromClusterManager != null) {
             // zero is valid but we only want to set it if we are not
@@ -177,7 +190,8 @@ public class MicroshardUtils {
             this.totalAddress = totalAddress;
         }
 
-        public ShardInfo() {
+        @SuppressWarnings("unused")
+        private ShardInfo() {
             totalAddress = -1;
             shardIndex = -1;
             destination = null;
@@ -185,8 +199,8 @@ public class MicroshardUtils {
 
         @Override
         public String toString() {
-            return "{ shardIndex:" + shardIndex + ", totalAddress:" + totalAddress + ", destination:" + SafeString.objectDescription(destination)
-                    + "}";
+            return "{ shardIndex:" + shardIndex + ", totalAddress:" + totalAddress + ", destination:" +
+                    SafeString.objectDescription(destination) + "}";
         }
     }
 

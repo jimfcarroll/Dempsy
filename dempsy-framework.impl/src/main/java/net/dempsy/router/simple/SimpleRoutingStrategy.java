@@ -29,26 +29,15 @@ public class SimpleRoutingStrategy implements RoutingStrategy.Router {
     private transient ClusterInfoSession session;
     private transient PersistentTask keepUpToDate;
 
-    private ClusterId clusterId;
+    final ClusterId clusterId;
+    private final SimpleRoutingStrategyFactory factory;
+
     private final AtomicReference<ContainerAddress> address = new AtomicReference<>();
     private final AtomicBoolean isReady = new AtomicBoolean(false);
 
-    @Override
-    public void setClusterId(final ClusterId clusterId) {
+    SimpleRoutingStrategy(final SimpleRoutingStrategyFactory mom, final ClusterId clusterId, final Infrastructure infra) {
+        this.factory = mom;
         this.clusterId = clusterId;
-    }
-
-    @Override
-    public ContainerAddress selectDestinationForMessage(final KeyedMessageWithType message) {
-        if (!isRunning.get())
-            throw new IllegalStateException(
-                    "attempt to use " + SimpleRoutingStrategy.class.getSimpleName() + " prior to starting it or after stopping it.");
-
-        return address.get();
-    }
-
-    @Override
-    public void start(final Infrastructure infra) {
         this.session = infra.getCollaborator();
         this.rootDir = infra.getRootPaths().clustersDir + "/" + clusterId.clusterName;
         this.isRunning = new AtomicBoolean(false);
@@ -101,12 +90,21 @@ public class SimpleRoutingStrategy implements RoutingStrategy.Router {
     }
 
     @Override
-    public void stop() {
-        isRunning.set(false);
+    public ContainerAddress selectDestinationForMessage(final KeyedMessageWithType message) {
+        if (!isRunning.get())
+            throw new IllegalStateException(
+                    "attempt to use " + SimpleRoutingStrategy.class.getSimpleName() + " prior to starting it or after stopping it.");
+
+        return address.get();
     }
 
     @Override
-    public boolean isReady() {
+    public void release() {
+        factory.release(this);
+        isRunning.set(false);
+    }
+
+    boolean isReady() {
         return isReady.get();
     }
 }

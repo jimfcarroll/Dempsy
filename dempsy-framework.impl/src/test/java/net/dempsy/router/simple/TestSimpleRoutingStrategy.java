@@ -1,5 +1,6 @@
 package net.dempsy.router.simple;
 
+import static net.dempsy.util.Functional.chain;
 import static net.dempsy.utils.test.ConditionPoll.poll;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotEquals;
@@ -7,8 +8,6 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 import java.util.Collection;
-import java.util.HashMap;
-import java.util.Map;
 
 import org.junit.After;
 import org.junit.Before;
@@ -21,14 +20,11 @@ import net.dempsy.cluster.ClusterInfoSession;
 import net.dempsy.cluster.local.LocalClusterSessionFactory;
 import net.dempsy.config.ClusterId;
 import net.dempsy.messages.KeyedMessageWithType;
-import net.dempsy.monitoring.ClusterStatsCollector;
-import net.dempsy.monitoring.NodeStatsCollector;
-import net.dempsy.monitoring.basic.BasicNodeStatsCollector;
-import net.dempsy.monitoring.basic.BasicStatsCollectorFactory;
 import net.dempsy.router.RoutingStrategy;
 import net.dempsy.router.RoutingStrategy.ContainerAddress;
 import net.dempsy.router.RoutingStrategyManager;
 import net.dempsy.transport.NodeAddress;
+import net.dempsy.util.TestInfrastructure;
 import net.dempsy.util.executor.AutoDisposeSingleThreadScheduler;
 
 public class TestSimpleRoutingStrategy {
@@ -38,40 +34,7 @@ public class TestSimpleRoutingStrategy {
     AutoDisposeSingleThreadScheduler sched = null;
 
     private static Infrastructure makeInfra(final ClusterInfoSession session, final AutoDisposeSingleThreadScheduler sched) {
-        return new Infrastructure() {
-            BasicStatsCollectorFactory sFact = new BasicStatsCollectorFactory();
-            BasicNodeStatsCollector nStats = new BasicNodeStatsCollector();
-
-            @Override
-            public ClusterInfoSession getCollaborator() {
-                return session;
-            }
-
-            @Override
-            public AutoDisposeSingleThreadScheduler getScheduler() {
-                return sched;
-            }
-
-            @Override
-            public RootPaths getRootPaths() {
-                return new RootPaths("/application", "/application/nodes", "/application/clusters");
-            }
-
-            @Override
-            public ClusterStatsCollector getClusterStatsCollector(final ClusterId clusterId) {
-                return sFact.createStatsCollector(clusterId, null);
-            }
-
-            @Override
-            public Map<String, String> getConfiguration() {
-                return new HashMap<>();
-            }
-
-            @Override
-            public NodeStatsCollector getNodeStatsCollector() {
-                return nStats;
-            }
-        };
+        return new TestInfrastructure(session, sched);
     }
 
     @Before
@@ -145,12 +108,11 @@ public class TestSimpleRoutingStrategy {
 
             assertTrue(waitForReg(session));
 
-            try (final RoutingStrategyManager obman = new RoutingStrategyManager();
-                    final RoutingStrategy.Factory obf = obman.getAssociatedInstance(SimpleRoutingStrategy.class.getPackage().getName());
-                    RoutingStrategy.Router ob = obf.getStrategy(cid)) {
-
-                try (final ClusterInfoSession ses2 = sessFact.createSession()) {
-                    ob.start(makeInfra(ses2, sched));
+            try (final ClusterInfoSession ses2 = sessFact.createSession()) {
+                try (final RoutingStrategyManager obman = chain(new RoutingStrategyManager(), o -> o.start(makeInfra(ses2, sched)));
+                        final RoutingStrategy.Factory obf = obman.getAssociatedInstance(SimpleRoutingStrategy.class.getPackage().getName());) {
+                    obf.start(makeInfra(ses2, sched));
+                    final RoutingStrategy.Router ob = obf.getStrategy(cid);
 
                     final KeyedMessageWithType km = new KeyedMessageWithType(null, null, "");
                     assertTrue(poll(o -> ob.selectDestinationForMessage(km) != null));

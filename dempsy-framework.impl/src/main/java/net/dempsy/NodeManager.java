@@ -20,6 +20,7 @@ import net.dempsy.config.ClusterId;
 import net.dempsy.config.Node;
 import net.dempsy.container.Container;
 import net.dempsy.messages.Adaptor;
+import net.dempsy.messages.MessageProcessorLifecycle;
 import net.dempsy.monitoring.ClusterStatsCollector;
 import net.dempsy.monitoring.ClusterStatsCollectorFactory;
 import net.dempsy.monitoring.NodeStatsCollector;
@@ -42,7 +43,7 @@ public class NodeManager implements Infrastructure, AutoCloseable {
 
     private Node node = null;
     private ClusterInfoSession session;
-    private final AutoDisposeSingleThreadScheduler persistenceScheduler = new AutoDisposeSingleThreadScheduler("Dempsy-pestering-");
+    private final AutoDisposeSingleThreadScheduler persistenceScheduler = new AutoDisposeSingleThreadScheduler("Dempsy-pestering");
 
     private final AtomicBoolean isRunning = new AtomicBoolean(false);
 
@@ -54,7 +55,7 @@ public class NodeManager implements Infrastructure, AutoCloseable {
     // created in start(). Stopped in stop()
     private Receiver receiver = null;
     private final List<PerContainer> containers = new ArrayList<>();
-    private final List<Adaptor> adaptors = new ArrayList<>();
+    private final Map<ClusterId, Adaptor> adaptors = new HashMap<>();
     private Router router = null;
     private PersistentTask keepNodeRegstered = null;
     private RootPaths rootPaths = null;
@@ -100,7 +101,7 @@ public class NodeManager implements Infrastructure, AutoCloseable {
         node.getClusters().forEach(c -> {
             if (c.isAdaptor()) {
                 final Adaptor adaptor = c.getAdaptor();
-                adaptors.add(adaptor);
+                adaptors.put(c.getClusterId(), adaptor);
             } else {
                 final Container con = makeContainer(node.getContainerTypeId()).setMessageProcessor(c.getMessageProcessor())
                         .setClusterId(c.getClusterId());
@@ -183,14 +184,10 @@ public class NodeManager implements Infrastructure, AutoCloseable {
         containers.forEach(pc -> tr.start(pc.container, this));
 
         // set up adaptors
-        adaptors.forEach(a -> a.setDispatcher(router));
+        adaptors.values().forEach(a -> a.setDispatcher(router));
 
         // start adaptors
-        adaptors.forEach(a -> {
-            // TODO: carry the name of the clusterid into the thread name.
-            threading.runDaemon(() -> tr.track(a).start(), "Adaptor-");
-
-        });
+        adaptors.entrySet().forEach(e -> threading.runDaemon(() -> tr.track(e.getValue()).start(), "Adaptor-" + e.getKey().clusterName));
 
         // IB routing strategy
         IntStream.range(0, containers.size()).forEach(i -> {
@@ -201,6 +198,7 @@ public class NodeManager implements Infrastructure, AutoCloseable {
 
         tr.track(receiver).start(nodeReciever, threading);
 
+        tr.track(session); // close this session when we're done.
         // =====================================
 
         return this;
@@ -213,7 +211,8 @@ public class NodeManager implements Infrastructure, AutoCloseable {
     }
 
     public boolean isReady() {
-        return ptaskReady.get() && tr.allReady();
+        final boolean ret = ptaskReady.get() && tr.allReady();
+        return ret;
     }
 
     @Override
@@ -274,12 +273,22 @@ public class NodeManager implements Infrastructure, AutoCloseable {
 
     // Testing accessors
 
-    /**
-     * STRICTLY FOR TESTING
-     */
-    public Router getRouter() {
+    // ==============================================================================
+    // ++++++++++++++++++++++++++ STRICTLY FOR TESTING ++++++++++++++++++++++++++++++
+    // ==============================================================================
+    Router getRouter() {
         return router;
     }
+
+    MessageProcessorLifecycle<?> getMp(final String clusterName) {
+        final Cluster cluster = node.getClusters().stream().filter(c -> clusterName.equals(c.getClusterId().clusterName)).findAny().orElse(null);
+        return cluster == null ? null : cluster.getMessageProcessor();
+    }
+
+    Container getContainer(final String clusterName) {
+        return containers.stream().filter(pc -> clusterName.equals(pc.clusterDefinition.getClusterId().clusterName)).findFirst().get().container;
+    }
+    // ==============================================================================
 
     private static class PerContainer {
         final Container container;

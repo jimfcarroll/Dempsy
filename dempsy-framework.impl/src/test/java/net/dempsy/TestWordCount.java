@@ -23,33 +23,45 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.zip.GZIPInputStream;
 
 import org.apache.commons.io.IOUtils;
+import org.junit.AfterClass;
 import org.junit.Before;
 import org.junit.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.support.ClassPathXmlApplicationContext;
 
-import net.dempsy.cluster.local.LocalClusterSessionFactory;
-import net.dempsy.config.Node;
+import net.dempsy.config.ClusterId;
 import net.dempsy.container.ClusterMetricGetters;
 import net.dempsy.lifecycle.annotation.Activation;
 import net.dempsy.lifecycle.annotation.MessageHandler;
 import net.dempsy.lifecycle.annotation.MessageKey;
+import net.dempsy.lifecycle.annotation.MessageProcessor;
 import net.dempsy.lifecycle.annotation.MessageType;
 import net.dempsy.lifecycle.annotation.Mp;
 import net.dempsy.lifecycle.annotation.utils.KeyExtractor;
 import net.dempsy.messages.Adaptor;
 import net.dempsy.messages.Dispatcher;
+import net.dempsy.messages.MessageProcessorLifecycle;
 import net.dempsy.utils.test.SystemPropertyManager;
 
-public class TestWordCount {
+public class TestWordCount extends DempsyBaseTest {
     private static Logger LOGGER = LoggerFactory.getLogger(TestWordCount.class);
 
     public static final String wordResource = "word-count/AV1611Bible.txt.gz";
 
+    public TestWordCount(final String routerId, final String containerId, final String sessCtx) {
+        super(LOGGER, routerId, containerId, sessCtx);
+    }
+
     @Before
     public void setup() {
         WordProducer.latch = new CountDownLatch(0);
+    }
+
+    @AfterClass
+    public static void cleanup() {
+        WordProducer.strings = null;
+        LOGGER.debug("cleaned up");
     }
 
     // ========================================================================
@@ -70,6 +82,12 @@ public class TestWordCount {
         public String getWord() {
             return word;
         }
+
+        @Override
+        public String toString() {
+            return "[ " + word + " ]";
+        }
+
     }
 
     @MessageType
@@ -90,6 +108,11 @@ public class TestWordCount {
         @MessageKey
         public String getKey() {
             return word;
+        }
+
+        @Override
+        public String toString() {
+            return "[ " + word + ", " + count + " ]";
         }
     }
 
@@ -188,17 +211,23 @@ public class TestWordCount {
     }
 
     public static class Rank {
-        public final String work;
+        public final String word;
         public final Long rank;
 
         public Rank(final String work, final long rank) {
-            this.work = work;
+            this.word = work;
             this.rank = rank;
+        }
+
+        @Override
+        public String toString() {
+            return "[ " + word + " count:" + rank + " ]";
         }
     }
 
     @Mp
     public static class WordRank implements Cloneable {
+        // This map is shared among clones.
         final public Map<String, Long> countMap = new ConcurrentHashMap<String, Long>();
 
         @MessageHandler
@@ -229,45 +258,129 @@ public class TestWordCount {
     // ========================================================================
 
     Set<String> finalResults = new HashSet<String>();
+
     {
         finalResults.addAll(Arrays.asList("the", "and", "of", "to", "And", "in", "that", "he", "shall", "unto", "I"));
     }
 
     @Test
-    public void testWordCount() throws Throwable {
-
-        final String[] ctxs = {
-                "classpath:/td/node.xml",
-                "classpath:/td/transport-bq.xml",
-                "classpath:/word-count/adaptor-kjv.xml",
-                "classpath:/word-count/mp-word-count.xml",
-                // "classpath:/word-count/mp-word-rank.xml",
-        };
-
-        WordProducer.latch = new CountDownLatch(1); // need to make it wait.
-        final WordProducer adaptor;
-        final ClusterMetricGetters stats;
-
+    public void testWordCountNoRank() throws Throwable {
         try (@SuppressWarnings("resource")
-        final SystemPropertyManager props = new SystemPropertyManager()
-                .set("routing-strategy", "net.dempsy.router.simple")
-                .set("container-type", "net.dempsy.container.locking");
-                final ClassPathXmlApplicationContext ctx = new ClassPathXmlApplicationContext(ctxs);
-                @SuppressWarnings("resource")
-        final NodeManager manager = new NodeManager().node(ctx.getBean(Node.class))
-                .collaborator(new LocalClusterSessionFactory().createSession()).start();) {
-            assertTrue(poll(o -> manager.isReady()));
+        final SystemPropertyManager props = new SystemPropertyManager().set("min_nodes", "1")) {
+            final String[][] ctxs = { {
+                    "classpath:/word-count/adaptor-kjv.xml",
+                    "classpath:/word-count/mp-word-count.xml",
+            } };
 
-            WordProducer.latch.countDown();
+            WordProducer.latch = new CountDownLatch(1); // need to make it wait.
+            runCombos(ctxs, nodes -> {
+                final NodeManager manager = nodes.get(0).manager;
+                final ClassPathXmlApplicationContext ctx = nodes.get(0).ctx;
 
-            adaptor = ctx.getBean(WordProducer.class);
-            stats = ctx.getBean(ClusterMetricGetters.class);
+                final WordProducer adaptor;
+                final ClusterMetricGetters stats;
 
-            assertTrue(poll(o -> adaptor.done.get()));
-            assertTrue(poll(o -> adaptor.numDispatched == stats.getProcessedMessageCount()));
+                WordProducer.latch.countDown();
 
+                adaptor = ctx.getBean(WordProducer.class);
+                stats = (ClusterMetricGetters) manager.getClusterStatsCollector(new ClusterId("test-app", "test-cluster1"));
+
+                assertTrue(poll(o -> adaptor.done.get()));
+                assertTrue(poll(o -> adaptor.numDispatched == stats.getProcessedMessageCount()));
+            });
         }
-
-        assertTrue(poll(o -> !adaptor.isRunning.get()));
     }
+
+    @Test
+    public void testWordCountWithRank() throws Throwable {
+        try (@SuppressWarnings("resource")
+        final SystemPropertyManager props = new SystemPropertyManager().set("min_nodes", "1")) {
+
+            final String[][] ctxs = { {
+                    "classpath:/word-count/adaptor-kjv.xml",
+                    "classpath:/word-count/mp-word-count.xml",
+                    "classpath:/word-count/mp-word-rank.xml",
+            } };
+
+            WordProducer.latch = new CountDownLatch(1); // need to make it wait.
+            runCombos(ctxs, nodes -> {
+                final NodeManager manager = nodes.get(0).manager;
+                final ClassPathXmlApplicationContext ctx = nodes.get(0).ctx;
+
+                final WordProducer adaptor;
+                final ClusterMetricGetters stats;
+
+                WordProducer.latch.countDown();
+
+                adaptor = ctx.getBean(WordProducer.class);
+                stats = (ClusterMetricGetters) manager.getClusterStatsCollector(new ClusterId("test-app", "test-cluster1"));
+
+                assertTrue(poll(o -> adaptor.done.get()));
+                assertTrue(poll(o -> adaptor.numDispatched == stats.getProcessedMessageCount()));
+
+                // wait until all of the counts are also passed to WordRank
+                final ClusterMetricGetters wrStats = (ClusterMetricGetters) manager
+                        .getClusterStatsCollector(new ClusterId("test-app", "test-cluster2"));
+                assertTrue(poll(wrStats, s -> adaptor.numDispatched == s.getProcessedMessageCount()));
+
+                stopSystem();
+
+                // pull the Rank mp from the manager
+                final MessageProcessorLifecycle<?> mp = NodeManagerTestUtil.getMp(manager, "test-cluster2");
+                @SuppressWarnings("unchecked")
+                final WordRank prototype = ((MessageProcessor<WordRank>) mp).getPrototype();
+                final List<Rank> ranks = prototype.getPairs();
+                Collections.sort(ranks, new Comparator<Rank>() {
+
+                    @Override
+                    public int compare(final Rank o1, final Rank o2) {
+                        return o2.rank.compareTo(o1.rank);
+                    }
+
+                });
+
+                final List<Rank> top10 = ranks.subList(0, 10);
+                top10.forEach(r -> assertTrue(finalResults.contains(r.word)));
+            });
+        }
+    }
+
+    @Test
+    public void testWordCountNoRankMultinode() throws Throwable {
+        try (@SuppressWarnings("resource")
+        final SystemPropertyManager props = new SystemPropertyManager().set("min_nodes", "2")) {
+
+            // skip this combination.
+            if (routerId.equals("simple"))
+                return;
+
+            final String[][] ctxs = {
+                    { "classpath:/word-count/adaptor-kjv.xml", "classpath:/word-count/mp-word-count.xml", },
+                    { "classpath:/word-count/mp-word-count.xml", },
+            };
+
+            WordProducer.latch = new CountDownLatch(1); // need to make it wait.
+            runCombos(ctxs, nodes -> {
+                final NodeManager[] manager = Arrays.asList(nodes.get(0).manager, nodes.get(1).manager).toArray(new NodeManager[2]);
+                final ClassPathXmlApplicationContext[] ctx = Arrays.asList(nodes.get(0).ctx, nodes.get(1).ctx)
+                        .toArray(new ClassPathXmlApplicationContext[2]);
+
+                WordProducer.latch.countDown();
+
+                final WordProducer adaptor = ctx[0].getBean(WordProducer.class);
+                final ClusterMetricGetters[] stats = Arrays.asList(
+                        (ClusterMetricGetters) manager[0].getClusterStatsCollector(new ClusterId("test-app", "test-cluster1")),
+                        (ClusterMetricGetters) manager[1].getClusterStatsCollector(new ClusterId("test-app", "test-cluster1")))
+                        .toArray(new ClusterMetricGetters[2]);
+
+                assertTrue(poll(o -> adaptor.done.get()));
+                assertTrue(poll(o -> {
+                    System.out.println(stats[0].getProcessedMessageCount() + ", " + stats[1].getProcessedMessageCount());
+                    return adaptor.numDispatched == Arrays.stream(stats).map(c -> c.getProcessedMessageCount())
+                            .reduce((c1, c2) -> c1.longValue() + c2.longValue()).get().longValue();
+                }));
+            });
+        }
+    }
+
 }

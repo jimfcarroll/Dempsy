@@ -1,6 +1,7 @@
 package net.dempsy.router.microshard;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.Map;
@@ -28,22 +29,19 @@ public class MicroshardingRouter implements RoutingStrategy.Router {
     private static final long RETRY_TIMEOUT = 500L;
 
     private final AtomicReference<ContainerAddress[]> destinations = new AtomicReference<ContainerAddress[]>(null);
-    private ClusterInfoSession session;
-    private ClusterId clusterId;
+    private final ClusterInfoSession session;
+    final ClusterId clusterId;
     private final AtomicBoolean isRunning = new AtomicBoolean(false);
-    private PersistentTask setupDestinations;
-    private AutoDisposeSingleThreadScheduler dscheduler;
-    private MicroshardUtils msutils;
+    private final PersistentTask setupDestinations;
+    private final AutoDisposeSingleThreadScheduler dscheduler;
+    private final MicroshardUtils msutils;
+    private final MicroshardingRouterFactory mommy;
 
-    @Override
-    public void setClusterId(final ClusterId clusterId) {
+    MicroshardingRouter(final MicroshardingRouterFactory mom, final ClusterId clusterId, final Infrastructure infra) {
+        this.mommy = mom;
         this.clusterId = clusterId;
-    }
-
-    @Override
-    public void start(final Infrastructure infra) {
         this.dscheduler = infra.getScheduler();
-        this.msutils = new MicroshardUtils(infra.getRootPaths(), clusterId);
+        this.msutils = new MicroshardUtils(infra.getRootPaths(), clusterId, null);
         this.session = infra.getCollaborator();
         this.isRunning.set(true);
         this.setupDestinations = makePersistentTask();
@@ -64,15 +62,15 @@ public class MicroshardingRouter implements RoutingStrategy.Router {
     }
 
     @Override
-    public synchronized void stop() {
+    public synchronized void release() {
+        mommy.release(this);
         isRunning.set(false);
     }
 
     /**
      * This makes sure all of the destinations are full.
      */
-    @Override
-    public boolean isReady() {
+    boolean isReady() {
         final ContainerAddress[] ds = destinations.get();
         if (ds == null)
             return false;
@@ -87,7 +85,12 @@ public class MicroshardingRouter implements RoutingStrategy.Router {
 
             @Override
             public String toString() {
-                return "setup or reset known destinations for Router from " + clusterId + " to " + clusterId;
+                final String prefix = "setup or reset known destinations for Router to " + clusterId + " from " + MicroshardingRouter.this;
+                if (LOGGER.isTraceEnabled()) {
+                    final ContainerAddress[] addr = destinations.get();
+                    return prefix + " known destinations=" + (addr == null ? null : Arrays.toString(addr));
+                } else
+                    return prefix;
             }
 
             @Override
@@ -98,7 +101,7 @@ public class MicroshardingRouter implements RoutingStrategy.Router {
 
                     final Map<Integer, ShardInfo> shardNumbersToShards = new HashMap<Integer, ShardInfo>();
                     final Collection<String> emptyShards = new ArrayList<String>();
-                    final int newtotalAddressCounts = msutils.fillMapFromActiveShards(shardNumbersToShards, session, null, this);
+                    final int newtotalAddressCounts = msutils.fillMapFromActiveShards(shardNumbersToShards, session, this);
 
                     // For now if we hit the race condition between when the target Inbound
                     // has created the shard and when it assigns the shard info, we simply claim

@@ -13,6 +13,9 @@ public class ServiceManager<T extends Service> extends Manager<T> implements Ser
 
     @Override
     public T getAssociatedInstance(final String typeId) throws DempsyException {
+        if (infra == null)
+            throw new IllegalStateException(
+                    "Cannot instantiate service of type " + typeId + " prior to " + this.getClass().getSimpleName() + " being started.");
         T ret = null;
 
         synchronized (registered) {
@@ -47,7 +50,13 @@ public class ServiceManager<T extends Service> extends Manager<T> implements Ser
 
     @Override
     public boolean isReady() {
-        return infra != null;
+        if (infra == null)
+            return false;
+        for (final Service cur : registered.values()) {
+            if (!cur.isReady())
+                return false;
+        }
+        return true;
     }
 
 }

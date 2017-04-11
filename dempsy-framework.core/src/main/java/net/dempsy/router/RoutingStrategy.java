@@ -48,13 +48,24 @@ public interface RoutingStrategy {
     }
 
     public static interface Factory extends Service {
+        /**
+         * Get the routing strategy associated with the downstream cluster denoted
+         * but {@code clusterId}. There should be no need to {@code start()} the 
+         * Router that's returned. Since the {@link Factory} is the manager for
+         * the {@link Router}s the caller should {@code release} the {@link Router}
+         * when it's done. 
+         */
         public Router getStrategy(ClusterId clusterId);
     }
 
-    public static interface Router extends Service {
-        public void setClusterId(ClusterId clusterId);
+    public static interface Router {
 
         public ContainerAddress selectDestinationForMessage(KeyedMessageWithType message);
+
+        /**
+         * This will call release on the {@link Factory} that created it.
+         */
+        public void release();
     }
 
     public static interface Inbound extends Service {

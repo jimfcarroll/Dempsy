@@ -89,13 +89,13 @@ public class MicroshardingInbound implements RoutingStrategy.Inbound {
     public void start(final Infrastructure infra) {
         this.dscheduler = infra.getScheduler();
         this.session = infra.getCollaborator();
-        this.msutils = new MicroshardUtils(infra.getRootPaths(), clusterId);
+        this.clusterInfo = new ClusterInfo(totalNumShards, minNumberOfNodes);
+        this.msutils = new MicroshardUtils(infra.getRootPaths(), clusterId, clusterInfo);
 
         totalNumShards = Integer
                 .parseInt(infra.getConfigValue(MicroshardingInbound.class, CONFIG_KEY_TOTAL_SHARDS, DEFAULT_TOTAL_SHARDS));
         minNumberOfNodes = Integer.parseInt(infra.getConfigValue(MicroshardingInbound.class, CONFIG_KEY_MIN_NODES, DEFAULT_MIN_NODES));
 
-        this.clusterInfo = new ClusterInfo(totalNumShards, minNumberOfNodes);
         this.shardChangeWatcher = getShardChangeWatcher();
         shardChangeWatcher.process(); // this invokes the acquireShards logic
     }
@@ -139,7 +139,7 @@ public class MicroshardingInbound implements RoutingStrategy.Inbound {
 
             private final void checkNodeDirectory() throws ClusterInfoException {
                 try {
-                    Collection<String> nodeDirs = msutils.persistentGetMainDirSubdirs(session, msutils.clusterNodesDir, this, clusterInfo);
+                    Collection<String> nodeDirs = msutils.persistentGetMainDirSubdirs(session, msutils.clusterNodesDir, this);
                     if (nodeDirectory == null || !session.exists(nodeDirectory, this)) {
                         nodeDirectory = session.mkdir(msutils.clusterNodesDir + "/node_", thisNodeAddress, DirMode.EPHEMERAL_SEQUENTIAL);
                         nodeDirs = session.getSubdirs(msutils.clusterNodesDir, this);
@@ -211,7 +211,7 @@ public class MicroshardingInbound implements RoutingStrategy.Inbound {
                     // ==============================================================================
                     // need to verify that the existing shards in destinationsAcquired are still ours.
                     final Map<Integer, ShardInfo> shardNumbersToShards = new HashMap<Integer, ShardInfo>();
-                    msutils.fillMapFromActiveShards(shardNumbersToShards, session, clusterInfo, this);
+                    msutils.fillMapFromActiveShards(shardNumbersToShards, session, this);
 
                     // First, are there any I don't know about that are in shardNumbersToShards.
                     // This could be because I was assigned a shard (or in a previous execute, I acquired one

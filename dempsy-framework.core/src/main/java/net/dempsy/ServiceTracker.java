@@ -9,7 +9,7 @@ import org.slf4j.LoggerFactory;
 
 import net.dempsy.util.SafeString;
 
-public class ServiceTracker {
+public class ServiceTracker implements AutoCloseable {
     private static Logger LOGGER = LoggerFactory.getLogger(ServiceTracker.class);
 
     private final List<AutoCloseable> services = new ArrayList<>();
@@ -53,12 +53,20 @@ public class ServiceTracker {
             for (final AutoCloseable ac : services) {
                 if (Service.class.isAssignableFrom(ac.getClass())) {
                     final boolean isReady = ((Service) ac).isReady();
-                    if (!isReady)
+                    if (!isReady) {
+                        if (LOGGER.isTraceEnabled())
+                            LOGGER.trace("The Service \"" + ac.getClass().getSimpleName() + "\" isnt' ready.");
                         return false;
+                    }
                 }
             }
         }
         return true;
+    }
+
+    @Override
+    public void close() {
+        stopAll();
     }
 
     private void add(final AutoCloseable service) {

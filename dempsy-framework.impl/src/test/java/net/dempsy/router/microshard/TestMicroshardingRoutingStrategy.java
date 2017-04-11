@@ -1,5 +1,6 @@
 package net.dempsy.router.microshard;
 
+import static net.dempsy.util.Functional.chain;
 import static net.dempsy.utils.test.ConditionPoll.poll;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
@@ -22,16 +23,13 @@ import net.dempsy.cluster.DisruptibleSession;
 import net.dempsy.cluster.local.LocalClusterSessionFactory;
 import net.dempsy.config.ClusterId;
 import net.dempsy.messages.KeyedMessageWithType;
-import net.dempsy.monitoring.ClusterStatsCollector;
-import net.dempsy.monitoring.NodeStatsCollector;
-import net.dempsy.monitoring.basic.BasicNodeStatsCollector;
-import net.dempsy.monitoring.basic.BasicStatsCollectorFactory;
 import net.dempsy.router.RoutingStrategy;
 import net.dempsy.router.RoutingStrategy.ContainerAddress;
 import net.dempsy.router.RoutingStrategyManager;
 import net.dempsy.router.microshard.MicroshardUtils.ShardInfo;
 import net.dempsy.router.simple.SimpleRoutingStrategy;
 import net.dempsy.transport.NodeAddress;
+import net.dempsy.util.TestInfrastructure;
 import net.dempsy.util.executor.AutoDisposeSingleThreadScheduler;
 
 public class TestMicroshardingRoutingStrategy {
@@ -39,50 +37,6 @@ public class TestMicroshardingRoutingStrategy {
     LocalClusterSessionFactory sessFact = null;
     ClusterInfoSession session = null;
     AutoDisposeSingleThreadScheduler sched = null;
-
-    private static class TestInfrastructure implements Infrastructure {
-        final ClusterInfoSession session;
-        final AutoDisposeSingleThreadScheduler sched;
-        final BasicStatsCollectorFactory statsFact;
-        final BasicNodeStatsCollector nodeStats;
-
-        TestInfrastructure(final ClusterInfoSession session, final AutoDisposeSingleThreadScheduler sched) {
-            this.session = session;
-            this.sched = sched;
-            statsFact = new BasicStatsCollectorFactory();
-            nodeStats = new BasicNodeStatsCollector();
-        }
-
-        @Override
-        public ClusterInfoSession getCollaborator() {
-            return session;
-        }
-
-        @Override
-        public AutoDisposeSingleThreadScheduler getScheduler() {
-            return sched;
-        }
-
-        @Override
-        public RootPaths getRootPaths() {
-            return new RootPaths("/application", "/application/nodes", "/application/clusters");
-        }
-
-        @Override
-        public ClusterStatsCollector getClusterStatsCollector(final ClusterId clusterId) {
-            return statsFact.createStatsCollector(clusterId, null);
-        }
-
-        @Override
-        public Map<String, String> getConfiguration() {
-            return new HashMap<>();
-        }
-
-        @Override
-        public NodeStatsCollector getNodeStatsCollector() {
-            return nodeStats;
-        }
-    }
 
     private static Infrastructure makeInfra(final ClusterInfoSession session, final AutoDisposeSingleThreadScheduler sched) {
         return new TestInfrastructure(session, sched);
@@ -109,7 +63,7 @@ public class TestMicroshardingRoutingStrategy {
         final Manager<RoutingStrategy.Inbound> manager = new Manager<>(RoutingStrategy.Inbound.class);
         try (final RoutingStrategy.Inbound ib = manager.getAssociatedInstance(MicroshardingInbound.class.getPackage().getName());) {
             final ClusterId clusterId = new ClusterId("test", "test");
-            final MicroshardUtils msutils = new MicroshardUtils(infra.getRootPaths(), clusterId);
+            final MicroshardUtils msutils = new MicroshardUtils(infra.getRootPaths(), clusterId, null);
 
             assertNotNull(ib);
             assertTrue(MicroshardingInbound.class.isAssignableFrom(ib.getClass()));
@@ -162,7 +116,7 @@ public class TestMicroshardingRoutingStrategy {
                 final RoutingStrategy.Inbound ib2 = new Manager<>(RoutingStrategy.Inbound.class)
                         .getAssociatedInstance(MicroshardingInbound.class.getPackage().getName());) {
             final ClusterId clusterId = new ClusterId("test", "test");
-            final MicroshardUtils msutils = new MicroshardUtils(infra.getRootPaths(), clusterId);
+            final MicroshardUtils msutils = new MicroshardUtils(infra.getRootPaths(), clusterId, null);
 
             ib1.setContainerDetails(clusterId, new ContainerAddress(new DummyNodeAddress("node1"), 0));
             ib1.start(infra);
@@ -197,7 +151,7 @@ public class TestMicroshardingRoutingStrategy {
         final Manager<RoutingStrategy.Inbound> manager = new Manager<>(RoutingStrategy.Inbound.class);
         try (final RoutingStrategy.Inbound ib = manager.getAssociatedInstance(MicroshardingInbound.class.getPackage().getName());) {
             final ClusterId clusterId = new ClusterId("test", "test");
-            final MicroshardUtils msutils = new MicroshardUtils(infra.getRootPaths(), clusterId);
+            final MicroshardUtils msutils = new MicroshardUtils(infra.getRootPaths(), clusterId, null);
 
             ib.setContainerDetails(clusterId, new ContainerAddress(new DummyNodeAddress("theOnlyNode"), 0));
             ib.start(infra);
@@ -216,24 +170,21 @@ public class TestMicroshardingRoutingStrategy {
         final Manager<RoutingStrategy.Inbound> manager = new Manager<>(RoutingStrategy.Inbound.class);
         try (final RoutingStrategy.Inbound ib = manager.getAssociatedInstance(MicroshardingInbound.class.getPackage().getName());) {
             final ClusterId cid = new ClusterId("test", "test");
-            final MicroshardUtils msutils = new MicroshardUtils(infra.getRootPaths(), cid);
+            final MicroshardUtils msutils = new MicroshardUtils(infra.getRootPaths(), cid, null);
 
             ib.setContainerDetails(cid, new ContainerAddress(new DummyNodeAddress("here"), 0));
             ib.start(infra);
 
             checkForShardDistribution(session, msutils, numShardsToExpect, 1);
 
-            try (final RoutingStrategyManager obman = new RoutingStrategyManager();
-                    final RoutingStrategy.Factory obf = obman.getAssociatedInstance(MicroshardingInbound.class.getPackage().getName());
-                    final RoutingStrategy.Router ob = obf.getStrategy(cid)) {
+            try (final ClusterInfoSession ses2 = sessFact.createSession()) {
+                try (final RoutingStrategyManager obman = chain(new RoutingStrategyManager(), o -> o.start(makeInfra(ses2, sched)));
+                        final RoutingStrategy.Factory obf = obman.getAssociatedInstance(MicroshardingInbound.class.getPackage().getName());) {
 
-                ob.setClusterId(cid);
-                ob.start(infra);
+                    assertTrue(poll(o -> obf.isReady()));
 
-                assertTrue(poll(o -> ob.isReady()));
-
-                try (final ClusterInfoSession ses2 = sessFact.createSession()) {
-                    ob.start(makeInfra(ses2, sched));
+                    obf.start(makeInfra(ses2, sched));
+                    final RoutingStrategy.Router ob = obf.getStrategy(cid);
 
                     final KeyedMessageWithType km = new KeyedMessageWithType(new Object(), new Object(), "");
                     assertTrue(poll(o -> ob.selectDestinationForMessage(km) != null));

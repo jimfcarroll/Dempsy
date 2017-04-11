@@ -37,8 +37,8 @@ import net.dempsy.config.Cluster;
 import net.dempsy.config.ClusterId;
 import net.dempsy.lifecycle.annotation.internal.AnnotatedMethodInvoker;
 import net.dempsy.lifecycle.annotation.utils.KeyExtractor;
-import net.dempsy.messages.KeyedMessageWithType;
 import net.dempsy.messages.KeyedMessage;
+import net.dempsy.messages.KeyedMessageWithType;
 import net.dempsy.messages.MessageProcessorLifecycle;
 import net.dempsy.util.SafeString;
 
@@ -48,7 +48,7 @@ import net.dempsy.util.SafeString;
 public class MessageProcessor<T> implements MessageProcessorLifecycle<T> {
     private static final Logger LOGGER = LoggerFactory.getLogger(MessageProcessor.class);
 
-    private final Object prototype;
+    private final T prototype;
     private final Class<?> mpClass;
     private final String mpClassName;
 
@@ -244,6 +244,10 @@ public class MessageProcessor<T> implements MessageProcessorLifecycle<T> {
     @Override
     public void start(final ClusterId clusterId) {
         checkOrInvokeValidStartMethod(true, clusterId);
+    }
+
+    public T getPrototype() {
+        return prototype;
     }
 
     // ----------------------------------------------------------------------------

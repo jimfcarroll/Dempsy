@@ -202,8 +202,6 @@ public class Router extends Dispatcher implements Service {
                                 }
                                 cur.add(clusterName);
                             });
-
-                            ob.start(infra);
                         }
 
                         outbounds.set(newOutbounds);
@@ -235,10 +233,8 @@ public class Router extends Dispatcher implements Service {
             final ApplicationState obs = outbounds.get();
             if (obs == null)
                 return false;
-            for (final RoutingStrategy.Router ob : obs.outboundByClusterName.values()) {
-                if (!ob.isReady())
-                    return false;
-            }
+            if (!manager.isReady()) // this will check the current Routers.
+                return false;
 
             for (final SenderFactory sf : obs.senderByNode.values()) {
                 if (!sf.isReady())
@@ -250,8 +246,10 @@ public class Router extends Dispatcher implements Service {
 
     @Override
     public void stop() {
-        isRunning.set(false);
-        stopEm(outbounds.getAndSet(null));
+        synchronized (isRunning) {
+            isRunning.set(false);
+            stopEm(outbounds.getAndSet(null));
+        }
     }
 
     /**
@@ -283,5 +281,24 @@ public class Router extends Dispatcher implements Service {
         }
     }
 
-    private static void stopEm(final ApplicationState obs) {}
+    private static void stopEm(final ApplicationState obs) {
+        if (obs != null) {
+            obs.outboundByClusterName.values().forEach(r -> {
+                try {
+                    r.release();
+                } catch (final RuntimeException rte) {
+                    LOGGER.warn("Problem while shutting down an outbound router", rte);
+                }
+            });
+
+            obs.senderByNode.values().forEach(sf -> {
+                try {
+                    sf.stop();
+                } catch (final RuntimeException rte) {
+                    LOGGER.warn("Problem while shutting down an SenderFactory", rte);
+                }
+            });
+        }
+    }
+
 }
