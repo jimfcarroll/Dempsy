@@ -7,6 +7,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -67,6 +68,14 @@ public class MicroshardingRouter implements RoutingStrategy.Router {
         isRunning.set(false);
     }
 
+    @Override
+    public Collection<ContainerAddress> allDesintations() {
+        final ContainerAddress[] cur = destinations.get();
+        if (cur == null)
+            return new ArrayList<>();
+        return Arrays.stream(cur).filter(ca -> ca != null).collect(Collectors.toList());
+    }
+
     /**
      * This makes sure all of the destinations are full.
      */
@@ -77,7 +86,12 @@ public class MicroshardingRouter implements RoutingStrategy.Router {
         for (final ContainerAddress d : ds)
             if (d == null)
                 return false;
-        return ds.length != 0; // this method is only called in tests and this needs to be true there.
+        final boolean ret = ds.length != 0; // this method is only called in tests and this needs to be true there.
+
+        if (ret) {
+            LOGGER.debug(Arrays.toString(ds));
+        }
+        return ret;
     }
 
     private PersistentTask makePersistentTask() {

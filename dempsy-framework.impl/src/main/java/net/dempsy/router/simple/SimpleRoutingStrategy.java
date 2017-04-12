@@ -1,5 +1,7 @@
 package net.dempsy.router.simple;
 
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
@@ -96,6 +98,12 @@ public class SimpleRoutingStrategy implements RoutingStrategy.Router {
                     "attempt to use " + SimpleRoutingStrategy.class.getSimpleName() + " prior to starting it or after stopping it.");
 
         return address.get();
+    }
+
+    @Override
+    public Collection<ContainerAddress> allDesintations() {
+        final ContainerAddress cur = address.get();
+        return cur == null ? new ArrayList<>() : Arrays.asList(cur);
     }
 
     @Override

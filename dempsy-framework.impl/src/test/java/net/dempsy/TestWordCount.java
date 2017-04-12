@@ -375,12 +375,11 @@ public class TestWordCount extends DempsyBaseTest {
 
                 assertTrue(poll(o -> adaptor.done.get()));
                 assertTrue(poll(o -> {
-                    System.out.println(stats[0].getProcessedMessageCount() + ", " + stats[1].getProcessedMessageCount());
+                    // System.out.println(stats[0].getProcessedMessageCount() + ", " + stats[1].getProcessedMessageCount());
                     return adaptor.numDispatched == Arrays.stream(stats).map(c -> c.getProcessedMessageCount())
                             .reduce((c1, c2) -> c1.longValue() + c2.longValue()).get().longValue();
                 }));
             });
         }
     }
-
 }

@@ -11,13 +11,13 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import net.dempsy.cluster.ClusterInfoException;
 import net.dempsy.cluster.ClusterInfoSession;
-import net.dempsy.config.ClusterId;
 import net.dempsy.messages.Dispatcher;
 import net.dempsy.messages.KeyedMessageWithType;
 import net.dempsy.monitoring.NodeStatsCollector;
@@ -25,6 +25,7 @@ import net.dempsy.router.RoutingStrategy;
 import net.dempsy.router.RoutingStrategy.ContainerAddress;
 import net.dempsy.router.RoutingStrategyManager;
 import net.dempsy.transport.NodeAddress;
+import net.dempsy.transport.Sender;
 import net.dempsy.transport.SenderFactory;
 import net.dempsy.transport.TransportManager;
 import net.dempsy.util.SafeString;
@@ -46,10 +47,141 @@ public class Router extends Dispatcher implements Service {
     private final NodeStatsCollector statsCollector;
 
     private static class ApplicationState {
-        public final Map<String, RoutingStrategy.Router> outboundByClusterName = new HashMap<>();
-        public final Map<String, List<String>> clusterNameByMessageType = new HashMap<>();
-        public final Map<String, SenderFactory> senderByTypeId = new HashMap<>();
-        public final Map<NodeAddress, SenderFactory> senderByNode = new HashMap<>();
+        private final Map<String, RoutingStrategy.Router> outboundByClusterNameX;
+        private final Map<String, List<String>> clusterNameByMessageTypeX;
+        private final Map<NodeAddress, Sender> senderByNodeX;
+        private final Map<NodeAddress, NodeInformation> current;
+
+        ApplicationState(final Map<String, net.dempsy.router.RoutingStrategy.Router> outboundByClusterNameX,
+                final Map<String, Set<String>> cnByType, final Map<NodeAddress, Sender> senderByNodeX,
+                final Map<NodeAddress, NodeInformation> current) {
+            this.outboundByClusterNameX = outboundByClusterNameX;
+            this.clusterNameByMessageTypeX = new HashMap<>();
+            cnByType.entrySet().forEach(e -> clusterNameByMessageTypeX.put(e.getKey(), new ArrayList<String>(e.getValue())));
+            this.senderByNodeX = senderByNodeX;
+            this.current = current;
+        }
+
+        ApplicationState() {
+            outboundByClusterNameX = new HashMap<>();
+            clusterNameByMessageTypeX = new HashMap<>();
+            senderByNodeX = new HashMap<>();
+            current = new HashMap<>();
+        }
+
+        public static class Update {
+            final Set<NodeInformation> toAdd;
+            final Set<NodeAddress> toDelete;
+            final Set<NodeInformation> leaveAlone;
+
+            public Update(final Set<NodeInformation> leaveAlone, final Set<NodeInformation> toAdd, final Set<NodeAddress> toDelete) {
+                this.toAdd = toAdd;
+                this.toDelete = toDelete;
+                this.leaveAlone = leaveAlone;
+            }
+
+            public boolean change() {
+                return (!(toDelete.size() == 0 && toAdd.size() == 0));
+            }
+        }
+
+        public Update update(final Set<NodeInformation> newState) {
+            final Set<NodeInformation> toAdd = new HashSet<>();
+            final Set<NodeAddress> toDelete = new HashSet<>();
+            final Set<NodeAddress> knownAddr = new HashSet<>(current.keySet());
+            final Set<NodeInformation> leaveAlone = new HashSet<>();
+
+            for (final NodeInformation cur : newState) {
+
+                final NodeInformation known = current.get(cur.nodeAddress);
+                if (known == null) // then we don't know about this one yet.
+                    // we need to add this one
+                    toAdd.add(cur);
+                else {
+                    if (!known.equals(cur)) { // known but changed ... we need to add and delete it
+                        toAdd.add(cur);
+                        toDelete.add(known.nodeAddress);
+                    } else
+                        leaveAlone.add(known);
+
+                    // remove it from the known ones. Whatever is leftover will
+                    // end up needing to be deleted.
+                    knownAddr.remove(known.nodeAddress);
+                }
+            }
+
+            // dump the remaining knownAddrs on the toDelete list
+            toDelete.addAll(knownAddr);
+
+            return new Update(leaveAlone, toAdd, toDelete);
+        }
+
+        public ApplicationState apply(final Update update, final TransportManager tmanager, final NodeStatsCollector statsCollector,
+                final RoutingStrategyManager manager) {
+            // apply toDelete first.
+            final Set<NodeAddress> toDelete = update.toDelete;
+
+            for (final NodeAddress cur : toDelete) {
+                senderByNodeX.get(current.get(cur).nodeAddress).stop();
+            }
+
+            final Map<NodeAddress, NodeInformation> newCurrent = new HashMap<>();
+            final Map<NodeAddress, Sender> newSenders = new HashMap<>();
+
+            // the one's to carry over.
+            final Set<NodeInformation> leaveAlone = update.leaveAlone;
+            for (final NodeInformation cur : leaveAlone) {
+                final Sender sender = senderByNodeX.get(cur.nodeAddress);
+                newSenders.put(cur.nodeAddress, sender);
+                newCurrent.put(cur.nodeAddress, cur);
+            }
+
+            // add new senders
+            final Set<NodeInformation> toAdd = update.toAdd;
+            for (final NodeInformation cur : toAdd) {
+                final SenderFactory sf = tmanager.getAssociatedInstance(cur.transportTypeId);
+                final Sender sender = sf.getSender(cur.nodeAddress);
+                newSenders.put(cur.nodeAddress, sender);
+                newCurrent.put(cur.nodeAddress, cur);
+            }
+
+            // now flush out the remaining caches.
+
+            // collapse all clusterInfos
+            final Set<ClusterInformation> allCis = new HashSet<>();
+            newCurrent.values().forEach(ni -> allCis.addAll(ni.clusterInfoByClusterId.values()));
+
+            final Map<String, RoutingStrategy.Router> newOutboundByClusterName = new HashMap<>();
+            final Map<String, Set<String>> cnByType = new HashMap<>();
+
+            final Set<String> knownClusterOutbounds = new HashSet<>(outboundByClusterNameX.keySet());
+
+            for (final ClusterInformation ci : allCis) {
+                final String clusterName = ci.clusterId.clusterName;
+                final RoutingStrategy.Router ob = outboundByClusterNameX.get(clusterName);
+                knownClusterOutbounds.remove(clusterName);
+                if (ob != null)
+                    newOutboundByClusterName.put(clusterName, ob);
+                else {
+                    final RoutingStrategy.Factory obfactory = manager.getAssociatedInstance(ci.routingStrategyTypeId);
+                    final RoutingStrategy.Router nob = obfactory.getStrategy(ci.clusterId);
+                    newOutboundByClusterName.put(clusterName, nob);
+                }
+
+                // add all of the message types handled.
+                ci.messageTypesHandled.forEach(mt -> {
+                    Set<String> entry = cnByType.get(mt);
+                    if (entry == null) {
+                        entry = new HashSet<>();
+                        cnByType.put(mt, entry);
+                    }
+                    entry.add(clusterName);
+                });
+            }
+
+            return new ApplicationState(newOutboundByClusterName, cnByType, newSenders, newCurrent);
+        }
+
     }
 
     public Router(final RoutingStrategyManager manager, final NodeAddress thisNode, final NodeReceiver nodeReciever,
@@ -68,11 +200,12 @@ public class Router extends Dispatcher implements Service {
 
         final ApplicationState cur = outbounds.get();
         if (cur == null) {
-            // we're down, or something.
+            LOGGER.warn("There's no known outbound destination from {}. Can't send {}.", thisNode, SafeString.objectDescription(message.message));
             return;
         }
-        final Map<String, List<String>> clusterNameByMessageType = cur.clusterNameByMessageType;
-        final Map<String, RoutingStrategy.Router> outboundByClusterName = cur.outboundByClusterName;
+
+        final Map<String, List<String>> clusterNameByMessageType = cur.clusterNameByMessageTypeX;
+        final Map<String, RoutingStrategy.Router> outboundByClusterName = cur.outboundByClusterNameX;
         final Set<String> uniqueClusters = new HashSet<>();
 
         Arrays.stream(message.messageTypes).forEach(mt -> {
@@ -110,12 +243,12 @@ public class Router extends Dispatcher implements Service {
             if (thisNode.equals(curNode))
                 nodeReciever.feedbackLoop(toSend);
             else {
-                final SenderFactory sf = cur.senderByNode.get(curNode);
+                final Sender sf = cur.senderByNodeX.get(curNode);
                 if (sf == null)
                     LOGGER.error("Couldn't send message to " + curNode + " because there's no " + SenderFactory.class.getSimpleName());
                 else
                     // TODO: more error handling
-                    sf.getSender(curNode).send(toSend);
+                    sf.send(toSend);
             }
         });
     }
@@ -129,16 +262,11 @@ public class Router extends Dispatcher implements Service {
 
             @Override
             public boolean execute() {
-                // stop all already running strategies.
-                final ApplicationState obs = outbounds.getAndSet(null);
-                stopEm(obs);
-
                 try {
+                    // collect up all NodeInfo's known about.
                     final Collection<String> nodeDirs = session.getSubdirs(nodesDir, this);
 
-                    final ApplicationState newOutbounds = new ApplicationState();
-
-                    final Set<NodeAddress> alreadySeen = new HashSet<>();
+                    final Set<NodeInformation> alreadySeen = new HashSet<>();
                     // get all of the subdirectories NodeInformations
                     for (final String subdir : nodeDirs) {
                         final NodeInformation ni = (NodeInformation) session.getData(nodesDir + "/" + subdir, null);
@@ -153,59 +281,22 @@ public class Router extends Dispatcher implements Service {
                             LOGGER.warn("The node " + ni.nodeAddress + " seems to be registed more than once.");
                             continue;
                         }
-                        alreadySeen.add(ni.nodeAddress);
-
-                        try {
-                            SenderFactory sf = newOutbounds.senderByTypeId.get(ni.transportTypeId);
-                            if (sf == null) {
-                                sf = tmanager.getAssociatedInstance(ni.transportTypeId);
-                                sf.setStatsCollector(statsCollector);
-                                newOutbounds.senderByTypeId.put(ni.transportTypeId, sf);
-                            }
-                            newOutbounds.senderByNode.put(ni.nodeAddress, sf);
-                        } catch (final DempsyException de) {
-                            LOGGER.warn("Couldn't create a transport to the node " + ni);
-                            continue;
-                        }
-
-                        final Map<ClusterId, ClusterInformation> known = new HashMap<>();
-
-                        final Collection<ClusterInformation> cis = ni.clusterInfoByClusterId.values();
-                        for (final ClusterInformation ci : cis) {
-                            // do we know about it already.
-                            final ClusterInformation existing = known.get(ci.clusterId);
-                            if (existing != null) {
-                                // check to make sure it's the same.
-                                if (!existing.equals(ci)) {
-                                    LOGGER.warn("The cluster " + ci.clusterId + " is in multiple nodes with different configurations. In the node "
-                                            + ni.nodeAddress.getGuid() + " it appears as " + ci + " but it was previously found as " + existing
-                                            + ". Continuing assuming the later is correct.");
-                                }
-
-                                continue;
-                            }
-
-                            known.put(ci.clusterId, ci);
-
-                            final RoutingStrategy.Factory obfactory = manager.getAssociatedInstance(ci.routingStrategyTypeId);
-                            final RoutingStrategy.Router ob = obfactory.getStrategy(ci.clusterId);
-
-                            final String clusterName = ci.clusterId.clusterName;
-
-                            newOutbounds.outboundByClusterName.put(clusterName, ob);
-                            // for each messageType add an entry
-                            ci.messageTypesHandled.forEach(mt -> {
-                                List<String> cur = newOutbounds.clusterNameByMessageType.get(mt);
-                                if (cur == null) {
-                                    cur = new ArrayList<>();
-                                    newOutbounds.clusterNameByMessageType.put(mt, cur);
-                                }
-                                cur.add(clusterName);
-                            });
-                        }
-
-                        outbounds.set(newOutbounds);
+                        alreadySeen.add(ni);
                     }
+
+                    // check to see if there's new nodes.
+                    final ApplicationState.Update ud = outbounds.get().update(alreadySeen);
+
+                    if (!ud.change()) {
+                        isReady.set(true);
+                        return true; // nothing to update.
+                    }
+
+                    // otherwise we will be making changes so remove the current ApplicationState
+                    final ApplicationState obs = outbounds.getAndSet(null);
+                    final ApplicationState newState = obs.apply(ud, tmanager, statsCollector, manager);
+                    outbounds.set(newState);
+
                     isReady.set(true);
                     return true;
                 } catch (final ClusterInfoException e) {
@@ -221,7 +312,10 @@ public class Router extends Dispatcher implements Service {
             public String toString() {
                 return "find nodes to route to";
             }
+
         };
+
+        outbounds.set(new ApplicationState());
 
         isRunning.set(true);
         checkup.process();
@@ -235,9 +329,16 @@ public class Router extends Dispatcher implements Service {
                 return false;
             if (!manager.isReady()) // this will check the current Routers.
                 return false;
+            if (!tmanager.isReady())
+                return false;
 
-            for (final SenderFactory sf : obs.senderByNode.values()) {
-                if (!sf.isReady())
+            // go through all of the outbounds and make sure we know about all of the nodes reachable.
+            final Set<NodeAddress> nodes = obs.outboundByClusterNameX.values().stream()
+                    .map(r -> r.allDesintations().stream().map(ca -> ca.node)).flatMap(i -> i).collect(Collectors.toSet());
+
+            // is there an outbound for each node?
+            for (final NodeAddress c : nodes) {
+                if (!obs.senderByNodeX.containsKey(c))
                     return false;
             }
             return true;
@@ -259,7 +360,7 @@ public class Router extends Dispatcher implements Service {
         final ApplicationState cur = outbounds.get();
         if (cur == null)
             return false;
-        final RoutingStrategy.Router ob = cur.outboundByClusterName.get(cluterName);
+        final RoutingStrategy.Router ob = cur.outboundByClusterNameX.get(cluterName);
         if (ob == null)
             return false;
         final ContainerAddress ca = ob.selectDestinationForMessage(message);
@@ -283,7 +384,7 @@ public class Router extends Dispatcher implements Service {
 
     private static void stopEm(final ApplicationState obs) {
         if (obs != null) {
-            obs.outboundByClusterName.values().forEach(r -> {
+            obs.outboundByClusterNameX.values().forEach(r -> {
                 try {
                     r.release();
                 } catch (final RuntimeException rte) {
@@ -291,7 +392,7 @@ public class Router extends Dispatcher implements Service {
                 }
             });
 
-            obs.senderByNode.values().forEach(sf -> {
+            obs.senderByNodeX.values().forEach(sf -> {
                 try {
                     sf.stop();
                 } catch (final RuntimeException rte) {

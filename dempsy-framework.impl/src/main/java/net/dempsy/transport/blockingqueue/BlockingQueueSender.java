@@ -38,6 +38,7 @@ public class BlockingQueueSender implements Sender {
     private final NodeStatsCollector statsCollector;
     private final boolean blocking;
     private final AtomicBoolean shutdown = new AtomicBoolean(false);
+    private final BlockingQueueSenderFactory owner;
 
     /**
      * <p>
@@ -56,14 +57,12 @@ public class BlockingQueueSender implements Sender {
      * @param blocking
      *            is whether or not to set this queue to blocking. It can be changed after a queue is started but there is no synchronization around the checking in the send method.
      */
-    public BlockingQueueSender(final BlockingQueue<Object> queue, final boolean blocking, final NodeStatsCollector statsCollector) {
+    BlockingQueueSender(final BlockingQueueSenderFactory factory, final BlockingQueue<Object> queue, final boolean blocking,
+            final NodeStatsCollector statsCollector) {
         this.statsCollector = statsCollector;
         this.queue = queue;
         this.blocking = blocking;
-    }
-
-    public BlockingQueueSender(final BlockingQueue<Object> queue) {
-        this(queue, true, null);
+        this.owner = factory;
     }
 
     /**
@@ -97,7 +96,10 @@ public class BlockingQueueSender implements Sender {
     }
 
     @Override
-    public void close() {
-        shutdown.set(true);
+    public void stop() {
+        if (!shutdown.get()) {
+            shutdown.set(true);
+            owner.imDone(this);
+        }
     }
 }

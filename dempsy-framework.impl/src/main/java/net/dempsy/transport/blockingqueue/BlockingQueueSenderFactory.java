@@ -34,7 +34,7 @@ public class BlockingQueueSenderFactory implements SenderFactory {
     public synchronized Sender getSender(final NodeAddress destination) throws MessageTransportException {
         BlockingQueueSender blockingQueueSender = senders.get(destination);
         if (blockingQueueSender == null) {
-            blockingQueueSender = new BlockingQueueSender(((BlockingQueueAddress) destination).getQueue(), blocking, statsCollector);
+            blockingQueueSender = new BlockingQueueSender(this, ((BlockingQueueAddress) destination).getQueue(), blocking, statsCollector);
             senders.put(destination, blockingQueueSender);
         }
 
@@ -44,7 +44,7 @@ public class BlockingQueueSenderFactory implements SenderFactory {
     @Override
     public synchronized void close() {
         for (final BlockingQueueSender sender : senders.values())
-            sender.close();
+            sender.stop();
     }
 
     @Override
@@ -61,5 +61,20 @@ public class BlockingQueueSenderFactory implements SenderFactory {
     public boolean isReady() {
         // we're always ready
         return true;
+    }
+
+    synchronized void imDone(final BlockingQueueSender sender) {
+        NodeAddress toRemove = null;
+        for (final Map.Entry<NodeAddress, BlockingQueueSender> e : senders.entrySet()) {
+            if (e.getValue() == sender) { // found it
+                toRemove = e.getKey();
+                break;
+            }
+        }
+
+        if (toRemove == null)
+            throw new IllegalArgumentException(
+                    "There was an attempt to stop a " + BlockingQueueSender.class.getSimpleName() + " that was already stopped");
+
     }
 }

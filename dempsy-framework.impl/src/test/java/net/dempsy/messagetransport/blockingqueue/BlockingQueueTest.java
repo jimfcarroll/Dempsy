@@ -16,6 +16,7 @@
 
 package net.dempsy.messagetransport.blockingqueue;
 
+import static net.dempsy.util.Functional.chain;
 import static net.dempsy.utils.test.ConditionPoll.poll;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
@@ -35,6 +36,7 @@ import net.dempsy.transport.Sender;
 import net.dempsy.transport.SenderFactory;
 import net.dempsy.transport.TransportManager;
 import net.dempsy.transport.blockingqueue.BlockingQueueReceiver;
+import net.dempsy.util.TestInfrastructure;
 
 public class BlockingQueueTest {
 
@@ -49,9 +51,9 @@ public class BlockingQueueTest {
         final ArrayBlockingQueue<Object> input = new ArrayBlockingQueue<>(16);
         try (final ThreadingModel tm = new DefaultThreadingModel();
                 final Receiver r = new BlockingQueueReceiver(input);
-                TransportManager tranMan = new TransportManager();
-                SenderFactory sf = tranMan.getAssociatedInstance(transportTypeId);
-                Sender sender = sf.getSender(r.getAddress())) {
+                final TransportManager tranMan = chain(new TransportManager(), c -> c.start(new TestInfrastructure(null, null)));
+                SenderFactory sf = tranMan.getAssociatedInstance(transportTypeId);) {
+            final Sender sender = sf.getSender(r.getAddress());
             r.start((final String msg) -> {
                 message.set(new String(msg));
                 return true;
@@ -73,9 +75,9 @@ public class BlockingQueueTest {
         final ArrayBlockingQueue<Object> input = new ArrayBlockingQueue<>(1);
         try (final ThreadingModel tm = new DefaultThreadingModel();
                 final Receiver r = new BlockingQueueReceiver(input);
-                TransportManager tranMan = new TransportManager();
-                SenderFactory sf = tranMan.getAssociatedInstance(transportTypeId);
-                Sender sender = sf.getSender(r.getAddress())) {
+                final TransportManager tranMan = chain(new TransportManager(), c -> c.start(new TestInfrastructure(null, null)));
+                final SenderFactory sf = tranMan.getAssociatedInstance(transportTypeId);) {
+            final Sender sender = sf.getSender(r.getAddress());
 
             final AtomicBoolean finallySent = new AtomicBoolean(false);
             final AtomicLong receiveCount = new AtomicLong();

@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
+import org.junit.Ignore;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 import org.junit.runners.Parameterized.Parameters;
@@ -24,6 +25,7 @@ import net.dempsy.config.Cluster;
 import net.dempsy.config.Node;
 import net.dempsy.utils.test.SystemPropertyManager;
 
+@Ignore
 @RunWith(Parameterized.class)
 public class DempsyBaseTest {
     /**

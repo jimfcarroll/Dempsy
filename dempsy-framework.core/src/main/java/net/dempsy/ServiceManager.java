@@ -1,5 +1,8 @@
 package net.dempsy;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -39,7 +42,12 @@ public class ServiceManager<T extends Service> extends Manager<T> implements Ser
 
     @Override
     public void stop() {
-        registered.values().forEach(rsf -> {
+        final List<T> tmp = new ArrayList<>();
+        synchronized (registered) {
+            tmp.addAll(registered.values());
+        }
+
+        tmp.forEach(rsf -> {
             try {
                 rsf.stop();
             } catch (final RuntimeException ret) {
@@ -52,7 +60,11 @@ public class ServiceManager<T extends Service> extends Manager<T> implements Ser
     public boolean isReady() {
         if (infra == null)
             return false;
-        for (final Service cur : registered.values()) {
+        final List<T> tmp = new ArrayList<>();
+        synchronized (registered) {
+            tmp.addAll(registered.values());
+        }
+        for (final Service cur : tmp) {
             if (!cur.isReady())
                 return false;
         }

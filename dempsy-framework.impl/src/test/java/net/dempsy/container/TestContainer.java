@@ -27,11 +27,15 @@ import static org.junit.Assert.assertTrue;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -106,7 +110,7 @@ public class TestContainer {
     private final String containerId;
 
     public static Map<String, TestProcessor> cache = null;
-    public static List<OutputMessage> outputMessages = null;
+    public static Set<OutputMessage> outputMessages = null;
 
     public TestContainer(final String containerId) {
         this.containerId = containerId;
@@ -397,7 +401,7 @@ public class TestContainer {
 
     @Test
     public void testInvokeOutput() throws Exception {
-        outputMessages = new ArrayList<OutputMessage>();
+        outputMessages = Collections.newSetFromMap(new ConcurrentHashMap<>());
         cache = new HashMap<>();
 
         final TestAdaptor adaptor = context.getBean(TestAdaptor.class);
@@ -435,8 +439,9 @@ public class TestContainer {
             // // order of messages is not guaranteed, so we need to aggregate keys
             final HashSet<String> messageKeys = new HashSet<String>();
 
-            messageKeys.add(outputMessages.get(0).getKey());
-            messageKeys.add(outputMessages.get(1).getKey());
+            final Iterator<OutputMessage> iter = outputMessages.iterator();
+            messageKeys.add(iter.next().getKey());
+            messageKeys.add(iter.next().getKey());
             assertTrue("first MP sent output", messageKeys.contains("foo"));
             assertTrue("second MP sent output", messageKeys.contains("bar"));
         }
@@ -444,7 +449,7 @@ public class TestContainer {
 
     @Test
     public void testMtInvokeOutput() throws Exception {
-        outputMessages = new ArrayList<OutputMessage>();
+        outputMessages = Collections.newSetFromMap(new ConcurrentHashMap<>());
         final int numInstances = 20;
         final int concurrency = 5;
 

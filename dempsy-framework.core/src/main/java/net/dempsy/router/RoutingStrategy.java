@@ -18,6 +18,7 @@ package net.dempsy.router;
 
 import java.io.Serializable;
 import java.util.Arrays;
+import java.util.Collection;
 
 import net.dempsy.Service;
 import net.dempsy.config.ClusterId;
@@ -95,6 +96,8 @@ public interface RoutingStrategy {
     public static interface Router {
 
         public ContainerAddress selectDestinationForMessage(KeyedMessageWithType message);
+
+        public Collection<ContainerAddress> allDesintations();
 
         /**
          * This will call release on the {@link Factory} that created it.
