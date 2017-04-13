@@ -1,5 +1,8 @@
 package net.dempsy;
 
+import static net.dempsy.Infrastructure.clusters;
+import static net.dempsy.Infrastructure.nodes;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -49,8 +52,7 @@ public class NodeManager implements Infrastructure, AutoCloseable {
 
     private final ServiceTracker tr = new ServiceTracker();
 
-    private final ThreadingModel threading = tr.track(new DefaultThreadingModel()).setCoresFactor(1.0).setAdditionalThreads(1)
-            .setMaxNumberOfQueuedLimitedTasks(10000).start();
+    private ThreadingModel threading;
 
     // created in start(). Stopped in stop()
     private Receiver receiver = null;
@@ -70,7 +72,7 @@ public class NodeManager implements Infrastructure, AutoCloseable {
     public NodeManager node(final Node node) {
         this.node = node;
         final String appName = node.application;
-        this.rootPaths = new RootPaths(root(appName), nodes(appName), clusters(appName));
+        this.rootPaths = new RootPaths(appName);
         return this;
     }
 
@@ -120,6 +122,9 @@ public class NodeManager implements Infrastructure, AutoCloseable {
         // first gather node information
         receiver = (Receiver) node.getReceiver();
         nodeAddress = receiver.getAddress();
+
+        threading = tr.track(new DefaultThreadingModel("NodeThreadPool-" + nodeAddress.getGuid() + "-")).setCoresFactor(1.0).setAdditionalThreads(1)
+                .setMaxNumberOfQueuedLimitedTasks(10000).start();
 
         final NodeReceiver nodeReciever = tr
                 .track(new NodeReceiver(containers.stream().map(pc -> pc.container).collect(Collectors.toList()), threading, nodeStatsCollector));
@@ -302,15 +307,4 @@ public class NodeManager implements Infrastructure, AutoCloseable {
         }
     }
 
-    private static String root(final String application) {
-        return "/" + application;
-    }
-
-    private static String nodes(final String application) {
-        return root(application) + "/nodes";
-    }
-
-    private static String clusters(final String application) {
-        return root(application) + "/clusters";
-    }
 }

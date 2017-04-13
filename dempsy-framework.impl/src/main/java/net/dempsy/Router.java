@@ -281,6 +281,12 @@ public class Router extends Dispatcher implements Service {
                             LOGGER.warn("The node " + ni.nodeAddress + " seems to be registed more than once.");
                             continue;
                         }
+
+                        if (ni.clusterInfoByClusterId.size() == 0) { // it's ALL adaptor so there's no sense in dealing with it
+                            LOGGER.trace("NodeInformation {} appears to be only an Adaptor.", ni);
+                            continue;
+                        }
+
                         alreadySeen.add(ni);
                     }
 

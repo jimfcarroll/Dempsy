@@ -49,7 +49,7 @@ public class BlockingQueueTest {
     public void testBlockingQueue() throws Exception {
         final AtomicReference<String> message = new AtomicReference<String>(null);
         final ArrayBlockingQueue<Object> input = new ArrayBlockingQueue<>(16);
-        try (final ThreadingModel tm = new DefaultThreadingModel();
+        try (final ThreadingModel tm = new DefaultThreadingModel("BQTest-testBlockingQueue-");
                 final Receiver r = new BlockingQueueReceiver(input);
                 final TransportManager tranMan = chain(new TransportManager(), c -> c.start(new TestInfrastructure(null, null)));
                 SenderFactory sf = tranMan.getAssociatedInstance(transportTypeId);) {
@@ -73,7 +73,7 @@ public class BlockingQueueTest {
     public void testBlockingQueueOverflow() throws Throwable {
         final AtomicReference<String> message = new AtomicReference<String>(null);
         final ArrayBlockingQueue<Object> input = new ArrayBlockingQueue<>(1);
-        try (final ThreadingModel tm = new DefaultThreadingModel();
+        try (final ThreadingModel tm = new DefaultThreadingModel("BQTest-testBlockingQueueOverflow-");
                 final Receiver r = new BlockingQueueReceiver(input);
                 final TransportManager tranMan = chain(new TransportManager(), c -> c.start(new TestInfrastructure(null, null)));
                 final SenderFactory sf = tranMan.getAssociatedInstance(transportTypeId);) {

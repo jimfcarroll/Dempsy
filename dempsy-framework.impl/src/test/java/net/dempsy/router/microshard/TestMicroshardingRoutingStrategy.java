@@ -1,26 +1,40 @@
 package net.dempsy.router.microshard;
 
 import static net.dempsy.util.Functional.chain;
+import static net.dempsy.util.Functional.uncheck;
 import static net.dempsy.utils.test.ConditionPoll.poll;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
+import java.io.IOException;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 
 import org.junit.After;
+import org.junit.AfterClass;
 import org.junit.Before;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
+import org.junit.runners.Parameterized.Parameters;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import net.dempsy.Infrastructure;
 import net.dempsy.Manager;
 import net.dempsy.cluster.ClusterInfoException;
 import net.dempsy.cluster.ClusterInfoSession;
+import net.dempsy.cluster.ClusterInfoSessionFactory;
 import net.dempsy.cluster.DisruptibleSession;
 import net.dempsy.cluster.local.LocalClusterSessionFactory;
+import net.dempsy.cluster.zookeeper.ZookeeperSession;
+import net.dempsy.cluster.zookeeper.ZookeeperSessionFactory;
+import net.dempsy.cluster.zookeeper.ZookeeperTestServer;
 import net.dempsy.config.ClusterId;
 import net.dempsy.messages.KeyedMessageWithType;
 import net.dempsy.router.RoutingStrategy;
@@ -28,23 +42,62 @@ import net.dempsy.router.RoutingStrategy.ContainerAddress;
 import net.dempsy.router.RoutingStrategyManager;
 import net.dempsy.router.microshard.MicroshardUtils.ShardInfo;
 import net.dempsy.router.simple.SimpleRoutingStrategy;
+import net.dempsy.serialization.jackson.JsonSerializer;
 import net.dempsy.transport.NodeAddress;
 import net.dempsy.util.TestInfrastructure;
 import net.dempsy.util.executor.AutoDisposeSingleThreadScheduler;
 
+@RunWith(Parameterized.class)
 public class TestMicroshardingRoutingStrategy {
+    static final Logger LOGGER = LoggerFactory.getLogger(TestMicroshardingRoutingStrategy.class);
     Infrastructure infra = null;
-    LocalClusterSessionFactory sessFact = null;
     ClusterInfoSession session = null;
     AutoDisposeSingleThreadScheduler sched = null;
+
+    final Consumer<ClusterInfoSession> disruptor;
+    final ClusterInfoSessionFactory sessFact;
+
+    private static ZookeeperTestServer zookeeperTestServer = null;
+    private static ClusterInfoSessionFactory zookeeperFactory = new ClusterInfoSessionFactory() {
+        ZookeeperSessionFactory proxied = null;
+
+        @Override
+        public ClusterInfoSession createSession() throws ClusterInfoException {
+            if (zookeeperTestServer == null)
+                zookeeperTestServer = uncheck(() -> new ZookeeperTestServer());
+            if (proxied == null)
+                proxied = new ZookeeperSessionFactory(zookeeperTestServer.connectString(), 5000, new JsonSerializer());
+            return proxied.createSession();
+        }
+    };
+
+    @Parameters(name = "{index}: session factory={0}, disruptor={1}")
+    public static Collection<Object[]> data() {
+        return Arrays.asList(new Object[][] {
+                { new LocalClusterSessionFactory(), "standard", (Consumer<ClusterInfoSession>) s -> ((DisruptibleSession) s).disrupt() },
+                { zookeeperFactory, "standard", (Consumer<ClusterInfoSession>) s -> ((DisruptibleSession) s).disrupt() },
+                { zookeeperFactory, "session-expire",
+                        (Consumer<ClusterInfoSession>) s -> uncheck(() -> zookeeperTestServer.forceSessionExpiration((ZookeeperSession) s)) },
+        });
+    }
+
+    public TestMicroshardingRoutingStrategy(final ClusterInfoSessionFactory factory, final String disruptorName,
+            final Consumer<ClusterInfoSession> disruptor) {
+        LOGGER.debug("Running {}", factory.getClass().getSimpleName());
+        this.sessFact = factory;
+        this.disruptor = disruptor;
+    }
 
     private static Infrastructure makeInfra(final ClusterInfoSession session, final AutoDisposeSingleThreadScheduler sched) {
         return new TestInfrastructure(session, sched);
     }
 
     @Before
-    public void setup() {
-        sessFact = new LocalClusterSessionFactory();
+    public void setup() throws ClusterInfoException, IOException {
+        if (zookeeperTestServer == null) {
+            zookeeperTestServer = new ZookeeperTestServer();
+        }
+
         session = sessFact.createSession();
         sched = new AutoDisposeSingleThreadScheduler("test");
 
@@ -55,6 +108,12 @@ public class TestMicroshardingRoutingStrategy {
     public void after() {
         if (session != null)
             session.close();
+    }
+
+    @AfterClass
+    public static void teardown() {
+        if (zookeeperTestServer != null)
+            zookeeperTestServer.close();
     }
 
     @Test
@@ -75,13 +134,23 @@ public class TestMicroshardingRoutingStrategy {
         }
     }
 
+    private static class MutableInt {
+        public int val;
+    }
+
     private static void checkForShardDistribution(final ClusterInfoSession session, final MicroshardUtils msutils, final int numShardsToExpect,
             final int numNodes) throws InterruptedException {
+        final MutableInt iters = new MutableInt();
         assertTrue(poll(o -> {
             try {
+                iters.val++;
+                final boolean showLog = LOGGER.isTraceEnabled() && (iters.val % 100 == 0);
                 final Collection<String> shards = session.getSubdirs(msutils.shardsDir, null);
-                if (shards.size() != numShardsToExpect)
+                if (shards.size() != numShardsToExpect) {
+                    if (showLog)
+                        LOGGER.trace("Not all shards available. Expecting {} but got {}", numShardsToExpect, shards.size());
                     return false;
+                }
                 final Map<NodeAddress, AtomicInteger> counts = new HashMap<>();
                 for (final String subdir : shards) {
                     final ShardInfo si = (ShardInfo) session.getData(msutils.shardsDir + "/" + subdir, null);
@@ -93,11 +162,18 @@ public class TestMicroshardingRoutingStrategy {
                     count.incrementAndGet();
                 }
 
-                if (counts.size() != numNodes)
+                if (counts.size() != numNodes) {
+                    if (showLog)
+                        LOGGER.trace("Not all nodes registered. {} out of {}", counts.size(), numNodes);
                     return false;
+                }
                 for (final Map.Entry<NodeAddress, AtomicInteger> entry : counts.entrySet()) {
-                    if (entry.getValue().get() != (numShardsToExpect / numNodes))
+                    if (Math.abs(entry.getValue().get() - (numShardsToExpect / numNodes)) > 1) {
+                        if (showLog)
+                            LOGGER.trace("Counts for {} is below what's expected. {} is not 1 away from " + (numShardsToExpect / numNodes) + ")",
+                                    entry.getKey(), entry.getValue());
                         return false;
+                    }
                 }
                 return true;
             } catch (final ClusterInfoException cie) {
@@ -122,7 +198,7 @@ public class TestMicroshardingRoutingStrategy {
             ib1.start(infra);
 
             ib2.setContainerDetails(clusterId, new ContainerAddress(new DummyNodeAddress("node2"), 0));
-            try (final ClusterInfoSession session2 = new LocalClusterSessionFactory().createSession();) {
+            try (final ClusterInfoSession session2 = sessFact.createSession();) {
                 ib2.start(new TestInfrastructure(session2, infra.getScheduler()));
 
                 assertTrue(waitForShards(session, msutils, numShardsToExpect));
@@ -131,7 +207,7 @@ public class TestMicroshardingRoutingStrategy {
                 checkForShardDistribution(session, msutils, numShardsToExpect, 2);
 
                 // disrupt the session. This should cause a reshuffle but not fail
-                ((DisruptibleSession) session2).disrupt();
+                disruptor.accept(session2);
 
                 // everything should settle back
                 checkForShardDistribution(session, msutils, numShardsToExpect, 2);
@@ -158,7 +234,7 @@ public class TestMicroshardingRoutingStrategy {
 
             checkForShardDistribution(session, msutils, numShardsToExpect, 1);
 
-            ((DisruptibleSession) session).disrupt();
+            disruptor.accept(session);
 
             checkForShardDistribution(session, msutils, numShardsToExpect, 1);
         }
@@ -194,7 +270,7 @@ public class TestMicroshardingRoutingStrategy {
 
                     assertEquals("here", ((DummyNodeAddress) ca.node).name);
 
-                    // now distupt the session
+                    // now disrupt the session
                     session.close();
 
                     // the destination should clear until a new in runs
@@ -215,6 +291,11 @@ public class TestMicroshardingRoutingStrategy {
     private static class DummyNodeAddress implements NodeAddress {
         private static final long serialVersionUID = 1L;
         public final String name;
+
+        @SuppressWarnings("unused")
+        private DummyNodeAddress() {
+            name = null;
+        }
 
         public DummyNodeAddress(final String name) {
             this.name = name;

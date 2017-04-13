@@ -19,7 +19,7 @@
      
      <property name="configuration">
        <map>
-         <entry key="net.dempsy.router.microshard.min_node_count" value="${min_nodes}" />
+         <entry key="net.dempsy.router.microshard.min_node_count" value="${min_nodes:1}" />
        </map>
      </property>
    </bean>

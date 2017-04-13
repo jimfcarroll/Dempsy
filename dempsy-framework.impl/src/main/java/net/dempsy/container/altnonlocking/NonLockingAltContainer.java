@@ -96,12 +96,12 @@ public class NonLockingAltContainer extends Container {
 
     @Override
     public void stop() {
-        isRunning = false;
         if (evictionScheduler != null)
             evictionScheduler.shutdownNow();
 
         // the following will close up any output executor that might be running
         setOutputCycleConcurrency(-1);
+        isRunning = false;
     }
 
     @Override
@@ -370,6 +370,8 @@ public class NonLockingAltContainer extends Container {
         }
     }
 
+    private final static AtomicLong evictionThreadNumber = new AtomicLong(0);
+
     public void startEvictionThread(final long evictionFrequency, final TimeUnit timeUnit) {
         if (0 == evictionFrequency || null == timeUnit) {
             LOGGER.warn("Eviction Thread cannot start with zero frequency or null TimeUnit {} {}", evictionFrequency, timeUnit);
@@ -377,7 +379,9 @@ public class NonLockingAltContainer extends Container {
         }
 
         if (prototype != null && prototype.isEvictionSupported()) {
-            evictionScheduler = Executors.newSingleThreadScheduledExecutor();
+            evictionScheduler = Executors.newSingleThreadScheduledExecutor(
+                    r -> new Thread(r, NonLockingAltContainer.class.getSimpleName() + "-Eviction-" + evictionThreadNumber.getAndIncrement()));
+
             evictionScheduler.scheduleWithFixedDelay(new Runnable() {
                 @Override
                 public void run() {
@@ -400,11 +404,14 @@ public class NonLockingAltContainer extends Container {
         }
     }
 
+    private static final AtomicLong outputThreadNum = new AtomicLong(0);
+
     private void setupOutputConcurrency() {
         if (prototype.isOutputSupported() && isRunning) {
             synchronized (lockForExecutorServiceSetter) {
                 if (outputConcurrency > 1)
-                    outputExecutorService = Executors.newFixedThreadPool(outputConcurrency);
+                    outputExecutorService = Executors.newFixedThreadPool(outputConcurrency,
+                            r -> new Thread(r, NonLockingAltContainer.class.getSimpleName() + "-Output-" + outputThreadNum.getAndIncrement()));
                 else {
                     if (outputExecutorService != null)
                         outputExecutorService.shutdown();

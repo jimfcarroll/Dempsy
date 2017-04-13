@@ -37,5 +37,21 @@ public interface Infrastructure {
             this.nodesDir = nodesDir;
             this.clustersDir = clustersDir;
         }
+
+        public RootPaths(final String appName) {
+            this(root(appName), nodes(appName), clusters(appName));
+        }
+    }
+
+    public static String root(final String application) {
+        return "/" + application;
+    }
+
+    public static String nodes(final String application) {
+        return root(application) + "/nodes";
+    }
+
+    public static String clusters(final String application) {
+        return root(application) + "/clusters";
     }
 }

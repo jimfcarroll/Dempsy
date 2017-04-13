@@ -73,7 +73,6 @@ public class MicroshardingInbound implements RoutingStrategy.Inbound {
     private ClusterId clusterId;
     // TODO: handle this
     private final KeyspaceResponsibilityChangeListener listener = new KeyspaceResponsibilityChangeListener() {
-
         @Override
         public void setInboundStrategy(final Inbound inbound) {}
 
@@ -84,6 +83,7 @@ public class MicroshardingInbound implements RoutingStrategy.Inbound {
     private ClusterInfo clusterInfo;
     private final AtomicBoolean isRunning = new AtomicBoolean(true);
     private PersistentTask shardChangeWatcher;
+    private Transaction tx;
 
     @Override
     public void start(final Infrastructure infra) {
@@ -97,6 +97,7 @@ public class MicroshardingInbound implements RoutingStrategy.Inbound {
         minNumberOfNodes = Integer.parseInt(infra.getConfigValue(MicroshardingInbound.class, CONFIG_KEY_MIN_NODES, DEFAULT_MIN_NODES));
 
         this.shardChangeWatcher = getShardChangeWatcher();
+        tx = new Transaction(msutils.shardTxDirectory, session, shardChangeWatcher);
         shardChangeWatcher.process(); // this invokes the acquireShards logic
     }
 
@@ -139,17 +140,19 @@ public class MicroshardingInbound implements RoutingStrategy.Inbound {
 
             private final void checkNodeDirectory() throws ClusterInfoException {
                 try {
+
+                    // get all of the nodes in the nodeDir and set one for this node if it's not already set.
                     Collection<String> nodeDirs = msutils.persistentGetMainDirSubdirs(session, msutils.clusterNodesDir, this);
                     if (nodeDirectory == null || !session.exists(nodeDirectory, this)) {
                         nodeDirectory = session.mkdir(msutils.clusterNodesDir + "/node_", thisNodeAddress, DirMode.EPHEMERAL_SEQUENTIAL);
                         nodeDirs = session.getSubdirs(msutils.clusterNodesDir, this);
                     }
 
+                    // verify the container address is correct.
                     ContainerAddress curDest = (ContainerAddress) session.getData(nodeDirectory, null);
                     if (curDest == null)
                         session.setData(nodeDirectory, thisNodeAddress);
-                    else if (!thisNodeAddress.equals(curDest)) // wth?
-                    {
+                    else if (!thisNodeAddress.equals(curDest)) { // wth?
                         final String tmp = nodeDirectory;
                         nodeDirectory = null;
                         throw new ClusterInfoException("Impossible! The Node directory " + tmp + " contains the destination for " + curDest
@@ -181,8 +184,9 @@ public class MicroshardingInbound implements RoutingStrategy.Inbound {
                 if (nodeDirectory != null) {
                     // attempt to remove the node directory
                     try {
-                        if (session.exists(nodeDirectory, null))
+                        if (session.exists(nodeDirectory, this)) {
                             session.rmdir(nodeDirectory);
+                        }
                         nodeDirectory = null;
                     } catch (final ClusterInfoException cie2) {}
                 }
@@ -196,10 +200,13 @@ public class MicroshardingInbound implements RoutingStrategy.Inbound {
                 final Random random = new Random();
 
                 try {
+                    tx.mkRootDirs();
+                    tx.watch(); // need to watch the transaciton dir.
+
                     // check node directory
                     checkNodeDirectory();
 
-                    final int currentWorkingNodeCount = findWorkingNodeCount(session, msutils, minNumberOfNodes, this);
+                    final int currentWorkingNodeCount = findWorkingNodeCount(session, msutils, minNumberOfNodes, null);
                     final int acquireUpToThisMany = (int) Math.floor((double) totalNumShards / (double) currentWorkingNodeCount);
                     final int releaseDownToThisMany = (int) Math.ceil((double) totalNumShards / (double) currentWorkingNodeCount);
 
@@ -211,7 +218,7 @@ public class MicroshardingInbound implements RoutingStrategy.Inbound {
                     // ==============================================================================
                     // need to verify that the existing shards in destinationsAcquired are still ours.
                     final Map<Integer, ShardInfo> shardNumbersToShards = new HashMap<Integer, ShardInfo>();
-                    msutils.fillMapFromActiveShards(shardNumbersToShards, session, this);
+                    msutils.fillMapFromActiveShards(shardNumbersToShards, session, null);
 
                     // First, are there any I don't know about that are in shardNumbersToShards.
                     // This could be because I was assigned a shard (or in a previous execute, I acquired one
@@ -270,8 +277,7 @@ public class MicroshardingInbound implements RoutingStrategy.Inbound {
                             LOGGER.info("Cannot reaquire the shard " + shardToReaquire + " for the cluster " + clusterId);
                             // I need to drop the shard from my list of destinations
                             destinationsToRemove.add(shardToReaquire);
-                        } else // otherwise, we successfully reacquired it.
-                        {
+                        } else { // otherwise, we successfully reacquired it.
                             if (traceOn)
                                 LOGGER.trace(MicroshardingInbound.this.toString() + " reacquired " + shardToReaquire);
 
@@ -296,6 +302,7 @@ public class MicroshardingInbound implements RoutingStrategy.Inbound {
 
                             curPos.remove();
                             session.rmdir(msutils.shardsDir + "/" + cur);
+                            tx.open();
                             numberOfShardsWeActuallyHave--;
                             shardNumbersToShards.remove(cur);
                         }
@@ -316,6 +323,7 @@ public class MicroshardingInbound implements RoutingStrategy.Inbound {
                                         " and was planning on removing it anyway.");
 
                             session.rmdir(msutils.shardsDir + "/" + cur);
+                            tx.open();
                             numberOfShardsWeActuallyHave--;
                             shardNumbersToShards.remove(cur);
                         }
@@ -335,6 +343,7 @@ public class MicroshardingInbound implements RoutingStrategy.Inbound {
                                         numberOfShardsWeActuallyHave + " but can give up to " + releaseDownToThisMany + ".");
 
                             session.rmdir(msutils.shardsDir + "/" + cur);
+                            tx.open();
                             numberOfShardsWeActuallyHave--;
                             destinationsToRemove.add(cur);
                             shardNumbersToShards.remove(cur);
@@ -352,7 +361,7 @@ public class MicroshardingInbound implements RoutingStrategy.Inbound {
 
                     List<Integer> shardsToTry = null;
                     Collection<String> subdirs;
-                    while (((subdirs = session.getSubdirs(msutils.shardsDir, this)).size() < totalNumShards) &&
+                    while (((subdirs = session.getSubdirs(msutils.shardsDir, null)).size() < totalNumShards) &&
                             (numberOfShardsWeActuallyHave < releaseDownToThisMany)) {
                         if (traceOn)
                             LOGGER.trace(MicroshardingInbound.this.toString() + " will try to grab more shards.");
@@ -394,6 +403,7 @@ public class MicroshardingInbound implements RoutingStrategy.Inbound {
                     if (LOGGER.isTraceEnabled())
                         LOGGER.trace(MicroshardingInbound.this.toString() + " Succesfully reset Inbound Strategy for cluster " + clusterId);
 
+                    tx.close();
                     return true;
                 } catch (final ClusterInfoException cie) {
                     throw new RuntimeException(cie); // let them know we failed
@@ -416,11 +426,11 @@ public class MicroshardingInbound implements RoutingStrategy.Inbound {
             if (!thisNodeAddress.equals(session.getData(nodeDirectory, null)))
                 return false;
 
-            if (session.getSubdirs(msutils.shardsDir, shardChangeWatcher).size() != totalNumShards)
+            if (session.getSubdirs(msutils.shardsDir, null).size() != totalNumShards)
                 return false;
 
             // make sure we have all of the nodes we should have
-            final int numNodes = session.getSubdirs(msutils.clusterNodesDir, shardChangeWatcher).size();
+            final int numNodes = session.getSubdirs(msutils.clusterNodesDir, null).size();
 
             return (destinationsAcquired.size() >= (int) Math.floor((double) totalNumShards / (double) numNodes)) &&
                     (destinationsAcquired.size() <= (int) Math.ceil((double) totalNumShards / (double) numNodes));
@@ -471,6 +481,7 @@ public class MicroshardingInbound implements RoutingStrategy.Inbound {
         final ShardInfo dest = new ShardInfo(thisNodeAddress, shardNum, totalNumShards);
         final String shardPath = msutils.shardsDir + "/" + String.valueOf(shardNum);
         if (session.mkdir(shardPath, dest, DirMode.EPHEMERAL) != null) {
+            tx.open();
             if (shardNumbersToShards != null)
                 shardNumbersToShards.put(shardNum, dest);
 

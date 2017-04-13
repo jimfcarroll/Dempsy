@@ -22,14 +22,19 @@ public class DefaultThreadingModel implements ThreadingModel {
     private double m = 1.25;
     private int additionalThreads = 2;
 
-    public DefaultThreadingModel() {}
+    private final String threadNameBase;
+
+    public DefaultThreadingModel(final String threadNameBase) {
+        this.threadNameBase = threadNameBase;
+    }
 
     /**
      * Create a DefaultDempsyExecutor with a fixed number of threads while setting the maximum number of limited tasks.
      */
-    public DefaultThreadingModel(final int threadPoolSize, final int maxNumWaitingLimitedTasks) {
+    public DefaultThreadingModel(final String threadNameBase, final int threadPoolSize, final int maxNumWaitingLimitedTasks) {
         this.threadPoolSize = threadPoolSize;
         this.maxNumWaitingLimitedTasks = maxNumWaitingLimitedTasks;
+        this.threadNameBase = threadNameBase;
     }
 
     /**
@@ -68,6 +73,8 @@ public class DefaultThreadingModel implements ThreadingModel {
         return this;
     }
 
+    private final static AtomicLong threadNum = new AtomicLong();
+
     @Override
     public DefaultThreadingModel start() {
         if (threadPoolSize == -1) {
@@ -77,7 +84,8 @@ public class DefaultThreadingModel implements ThreadingModel {
                                                                                             // then use the other constructor
             threadPoolSize = Math.max(cpuBasedThreadCount, minNumThreads);
         }
-        executor = (ThreadPoolExecutor) Executors.newFixedThreadPool(threadPoolSize);
+        executor = (ThreadPoolExecutor) Executors.newFixedThreadPool(threadPoolSize,
+                r -> new Thread(r, threadNameBase + threadNum.getAndIncrement()));
         schedule = Executors.newSingleThreadScheduledExecutor();
         numLimited = new AtomicLong(0);
 

@@ -244,13 +244,7 @@ public class TestWordCount extends DempsyBaseTest {
             final List<Rank> ret = new ArrayList<>(countMap.size() + 10);
             for (final Map.Entry<String, Long> cur : countMap.entrySet())
                 ret.add(new Rank(cur.getKey(), cur.getValue()));
-            Collections.sort(ret, new Comparator<Rank>() {
-                @Override
-                public int compare(final Rank o1, final Rank o2) {
-                    return o2.rank.compareTo(o1.rank);
-                }
-
-            });
+            Collections.sort(ret, (o1, o2) -> o2.rank.compareTo(o1.rank));
             return ret;
         }
     }
@@ -273,7 +267,8 @@ public class TestWordCount extends DempsyBaseTest {
             } };
 
             WordProducer.latch = new CountDownLatch(1); // need to make it wait.
-            runCombos(ctxs, nodes -> {
+            runCombos(ctxs, n -> {
+                final List<NodeManagerWithContext> nodes = n.nodes;
                 final NodeManager manager = nodes.get(0).manager;
                 final ClassPathXmlApplicationContext ctx = nodes.get(0).ctx;
 
@@ -303,7 +298,8 @@ public class TestWordCount extends DempsyBaseTest {
             } };
 
             WordProducer.latch = new CountDownLatch(1); // need to make it wait.
-            runCombos(ctxs, nodes -> {
+            runCombos(ctxs, n -> {
+                final List<NodeManagerWithContext> nodes = n.nodes;
                 final NodeManager manager = nodes.get(0).manager;
                 final ClassPathXmlApplicationContext ctx = nodes.get(0).ctx;
 
@@ -350,17 +346,14 @@ public class TestWordCount extends DempsyBaseTest {
         try (@SuppressWarnings("resource")
         final SystemPropertyManager props = new SystemPropertyManager().set("min_nodes", "2")) {
 
-            // skip this combination.
-            if (routerId.equals("simple"))
-                return;
-
             final String[][] ctxs = {
                     { "classpath:/word-count/adaptor-kjv.xml", "classpath:/word-count/mp-word-count.xml", },
                     { "classpath:/word-count/mp-word-count.xml", },
             };
 
             WordProducer.latch = new CountDownLatch(1); // need to make it wait.
-            runCombos(ctxs, nodes -> {
+            runCombos((r, c, s) -> !r.equals("simple"), ctxs, n -> {
+                final List<NodeManagerWithContext> nodes = n.nodes;
                 final NodeManager[] manager = Arrays.asList(nodes.get(0).manager, nodes.get(1).manager).toArray(new NodeManager[2]);
                 final ClassPathXmlApplicationContext[] ctx = Arrays.asList(nodes.get(0).ctx, nodes.get(1).ctx)
                         .toArray(new ClassPathXmlApplicationContext[2]);

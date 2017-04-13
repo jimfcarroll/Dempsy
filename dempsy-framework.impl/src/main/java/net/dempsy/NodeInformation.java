@@ -17,7 +17,7 @@ public class NodeInformation implements Serializable {
     private NodeInformation() {
         transportTypeId = null;
         nodeAddress = null;
-        clusterInfoByClusterId = null;
+        clusterInfoByClusterId = new HashMap<>();
     }
 
     public NodeInformation(final String transportTypeId, final NodeAddress nodeAddress,

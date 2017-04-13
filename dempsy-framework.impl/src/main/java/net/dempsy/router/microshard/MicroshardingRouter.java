@@ -5,6 +5,7 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
@@ -26,7 +27,7 @@ import net.dempsy.util.executor.AutoDisposeSingleThreadScheduler;
 import net.dempsy.utils.PersistentTask;
 
 public class MicroshardingRouter implements RoutingStrategy.Router {
-    private static Logger LOGGER = LoggerFactory.getLogger(MicroshardingInbound.class);
+    private static Logger LOGGER = LoggerFactory.getLogger(MicroshardingRouter.class);
     private static final long RETRY_TIMEOUT = 500L;
 
     private final AtomicReference<ContainerAddress[]> destinations = new AtomicReference<ContainerAddress[]>(null);
@@ -89,20 +90,27 @@ public class MicroshardingRouter implements RoutingStrategy.Router {
         final boolean ret = ds.length != 0; // this method is only called in tests and this needs to be true there.
 
         if (ret) {
-            LOGGER.debug(Arrays.toString(ds));
+            LOGGER.debug("Is Ready " + shorthand(ds));
         }
         return ret;
     }
 
+    private static Set<ContainerAddress> shorthand(final ContainerAddress[] addr) {
+        if (addr == null)
+            return null;
+        return Arrays.stream(addr).collect(Collectors.toSet());
+    }
+
     private PersistentTask makePersistentTask() {
         return new PersistentTask(LOGGER, isRunning, dscheduler, RETRY_TIMEOUT) {
+            Transaction tx = new Transaction(msutils.shardTxDirectory, session, this);
 
             @Override
             public String toString() {
                 final String prefix = "setup or reset known destinations for Router to " + clusterId + " from " + MicroshardingRouter.this;
                 if (LOGGER.isTraceEnabled()) {
                     final ContainerAddress[] addr = destinations.get();
-                    return prefix + " known destinations=" + (addr == null ? null : Arrays.toString(addr));
+                    return prefix + " known destinations=" + shorthand(addr);
                 } else
                     return prefix;
             }
@@ -113,9 +121,14 @@ public class MicroshardingRouter implements RoutingStrategy.Router {
                     if (LOGGER.isTraceEnabled())
                         LOGGER.trace("Resetting Outbound Strategy for cluster " + clusterId + " from " + clusterId);
 
+                    tx.watch();
+
+                    // we need to watch the node directory since relying on the transaction doesn't tell me when a node drops out.
+                    session.getSubdirs(msutils.clusterNodesDir, this);
+
                     final Map<Integer, ShardInfo> shardNumbersToShards = new HashMap<Integer, ShardInfo>();
                     final Collection<String> emptyShards = new ArrayList<String>();
-                    final int newtotalAddressCounts = msutils.fillMapFromActiveShards(shardNumbersToShards, session, this);
+                    final int newtotalAddressCounts = msutils.fillMapFromActiveShards(shardNumbersToShards, session, null);
 
                     // For now if we hit the race condition between when the target Inbound
                     // has created the shard and when it assigns the shard info, we simply claim
@@ -137,10 +150,14 @@ public class MicroshardingRouter implements RoutingStrategy.Router {
                     } else
                         destinations.set(new ContainerAddress[0]);
 
-                    return destinations.get() != null;
+                    final boolean ret = destinations.get() != null;
+
+                    if (ret)
+                        tx.close();
+                    return ret;
                 } catch (final ClusterInfoException e) {
                     destinations.set(null);
-                    LOGGER.warn("Failed to set up the Outbound for " + clusterId + " from " + clusterId, e);
+                    LOGGER.debug("Failed to set up the Outbound for {}: {}", clusterId, e.getLocalizedMessage());
                 } catch (final RuntimeException rte) {
                     destinations.set(null); // failure means retry but we're not ready.
                     throw rte;

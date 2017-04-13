@@ -90,7 +90,7 @@ public class TestContainer {
             "classpath:/spring/container/test-adaptor.xml"
     };
 
-    @Parameters
+    @Parameters(name = "{index}: container type={0}")
     public static Collection<Object[]> data() {
         return Arrays.asList(new Object[][] {
                 { LockingContainer.class.getPackage().getName() },
@@ -138,6 +138,7 @@ public class TestContainer {
         cache = null;
         outputMessages = null;
         recheck(() -> toClose.forEach(v -> uncheck(() -> v.close())), Exception.class);
+        toClose.clear();
         LocalClusterSessionFactory.completeReset();
     }
 
