@@ -1,37 +1,38 @@
 package net.dempsy.transport.passthrough;
 
-import java.util.List;
-
-import net.dempsy.monitoring.StatsCollector;
+import net.dempsy.monitoring.NodeStatsCollector;
 import net.dempsy.transport.Listener;
 import net.dempsy.transport.MessageTransportException;
 import net.dempsy.transport.Sender;
-import net.dempsy.util.io.MessageBufferInput;
-import net.dempsy.util.io.MessageBufferOutput;
 
 public class PassthroughSender implements Sender {
-    StatsCollector statsCollector = null;
-    List<Listener<?>> listeners;
-    boolean isRunning = true;
+    private NodeStatsCollector statsCollector = null;
+    private Listener<Object> listener = null;
+    private boolean isRunning = true;
 
-    private PassthroughSender(final List<Listener> listeners) {
-        this.listeners = listeners;
+    void setStatsCollector(final NodeStatsCollector sc) {
+        this.statsCollector = sc;
+    }
+
+    void setListener(final Listener<Object> listener) {
+        this.listener = listener;
     }
 
     @Override
-    public void send(final MessageBufferOutput message) throws MessageTransportException {
-        final MessageBufferInput messageBytes = new MessageBufferInput(message.getBuffer(), 0, message.getPosition());
+    public void send(final Object message) throws MessageTransportException {
         if (!isRunning) {
             if (statsCollector != null)
-                statsCollector.messageNotSent(messageBytes);
+                statsCollector.messageNotSent();
             throw new MessageTransportException("send called on stopped PassthroughSender");
         }
 
-        for (final Listener listener : listeners) {
-            if (statsCollector != null)
-                statsCollector.messageSent(messageBytes.available());
-            listener.onMessage(messageBytes, failFast);
-        }
+        listener.onMessage(message);
+        if (statsCollector != null)
+            statsCollector.messageSent(message);
     }
 
+    @Override
+    public void stop() {
+        isRunning = false;
+    }
 }

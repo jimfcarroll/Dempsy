@@ -49,8 +49,8 @@ public class TestWordCount extends DempsyBaseTest {
 
     public static final String wordResource = "word-count/AV1611Bible.txt.gz";
 
-    public TestWordCount(final String routerId, final String containerId, final String sessCtx) {
-        super(LOGGER, routerId, containerId, sessCtx);
+    public TestWordCount(final String routerId, final String containerId, final String sessCtx, final String tpid) {
+        super(LOGGER, routerId, containerId, sessCtx, tpid);
     }
 
     @Before
@@ -352,7 +352,7 @@ public class TestWordCount extends DempsyBaseTest {
             };
 
             WordProducer.latch = new CountDownLatch(1); // need to make it wait.
-            runCombos((r, c, s) -> !r.equals("simple"), ctxs, n -> {
+            runCombos((r, c, s, t) -> !r.equals("simple"), ctxs, n -> {
                 final List<NodeManagerWithContext> nodes = n.nodes;
                 final NodeManager[] manager = Arrays.asList(nodes.get(0).manager, nodes.get(1).manager).toArray(new NodeManager[2]);
                 final ClassPathXmlApplicationContext[] ctx = Arrays.asList(nodes.get(0).ctx, nodes.get(1).ctx)

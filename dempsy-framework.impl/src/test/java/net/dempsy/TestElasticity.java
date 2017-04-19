@@ -46,8 +46,8 @@ public class TestElasticity extends DempsyBaseTest {
             { "elasticity/mp-num-rank.xml", },
     };
 
-    public TestElasticity(final String routerId, final String containerId, final String sessCtx) {
-        super(LOGGER, routerId, containerId, sessCtx);
+    public TestElasticity(final String routerId, final String containerId, final String sessCtx, final String tpCtx) {
+        super(LOGGER, routerId, containerId, sessCtx, tpCtx);
     }
 
     @Before
@@ -225,7 +225,7 @@ public class TestElasticity extends DempsyBaseTest {
 
         final KeyExtractor ke = new KeyExtractor();
 
-        runCombos((r, c, s) -> "microshard".equals(r), actxPath, ns -> {
+        runCombos((r, c, s, t) -> "microshard".equals(r), actxPath, ns -> {
             final List<NodeManagerWithContext> nodes = ns.nodes;
             LOGGER.trace("==== Starting ...");
 
@@ -281,7 +281,7 @@ public class TestElasticity extends DempsyBaseTest {
     @Test
     public void testNumberCountDropOneAndReAdd() throws Throwable {
 
-        runCombos((r, c, s) -> "microshard".equals(r), actxPath, ns -> {
+        runCombos((r, c, s, t) -> "microshard".equals(r), actxPath, ns -> {
             // keepGoing is for the separate thread that pumps messages into the system.
             final AtomicBoolean keepGoing = new AtomicBoolean(true);
             try {
@@ -345,7 +345,7 @@ public class TestElasticity extends DempsyBaseTest {
 
     @Test
     public void testNumberCountAddOneThenDrop() throws Throwable {
-        runCombos((r, c, s) -> "microshard".equals(r), actxPath, ns -> {
+        runCombos((r, c, s, t) -> "microshard".equals(r), actxPath, ns -> {
             // keepGoing is for the separate thread that pumps messages into the system.
             final AtomicBoolean keepGoing = new AtomicBoolean(true);
             try {

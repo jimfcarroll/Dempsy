@@ -64,31 +64,38 @@ public class DempsyBaseTest {
     protected final String routerId;
     protected final String containerId;
     protected final String sessionType;
+    protected final String transportType;
 
     protected static final String ROUTER_ID_PREFIX = "net.dempsy.router.";
     protected static final String CONTAINER_ID_PREFIX = "net.dempsy.container.";
     protected static final String COLLAB_CTX_PREFIX = "classpath:/td/collab-";
     protected static final String COLLAB_CTX_SUFFIX = ".xml";
+    protected static final String TRANSPORT_CTX_PREFIX = "classpath:/td/transport-";
+    protected static final String TRANSPORT_CTX_SUFFIX = ".xml";
 
     protected DempsyBaseTest(final Logger logger, final String routerId, final String containerId,
-            final String sessionType) {
+            final String sessionType, final String transportType) {
         this.LOGGER = logger;
         this.routerId = routerId;
         this.containerId = containerId;
         this.sessionType = sessionType;
+        this.transportType = transportType;
     }
 
-    @Parameters(name = "{index}: routerId={0}, container={1}, cluster={2}")
+    @Parameters(name = "{index}: routerId={0}, container={1}, cluster={2}, transport={3}")
     public static Collection<Object[]> combos() {
         final String[] routers = { "simple", "microshard" };
         final String[] containers = { "locking", "nonlocking", "altnonlocking" };
         final String[] sessions = { "local", "zookeeper" };
+        final String[] transports = { "bq", "passthrough" };
 
         final List<Object[]> ret = new ArrayList<>();
         for (final String router : routers) {
             for (final String container : containers) {
                 for (final String sessFact : sessions) {
-                    ret.add(new Object[] { router, container, sessFact });
+                    for (final String tp : transports) {
+                        ret.add(new Object[] { router, container, sessFact, tp });
+                    }
                 }
             }
         }
@@ -128,10 +135,10 @@ public class DempsyBaseTest {
 
     @FunctionalInterface
     public static interface ComboFilter {
-        public boolean filter(final String routerId, final String containerId, final String sessionType);
+        public boolean filter(final String routerId, final String containerId, final String sessionType, final String transportId);
     }
 
-    private static final String[] frameworkCtx = { "classpath:/td/node.xml", "classpath:/td/transport-bq.xml" };
+    private static final String[] frameworkCtx = { "classpath:/td/node.xml" };
 
     ServiceTracker currentlyTracking = null;
     ClusterInfoSessionFactory currentSessionFactory = null;
@@ -150,7 +157,7 @@ public class DempsyBaseTest {
     }
 
     protected void runCombos(final ComboFilter filter, final String[][] ctxs, final TestToRun test) throws Exception {
-        if (filter != null && !filter.filter(routerId, containerId, sessionType))
+        if (filter != null && !filter.filter(routerId, containerId, sessionType, transportType))
             return;
 
         try (final ServiceTracker tr = new ServiceTracker()) {
@@ -183,6 +190,7 @@ public class DempsyBaseTest {
     protected NodeManagerWithContext makeNode(final String[] ctxArr) {
         final List<String> fullCtx = new ArrayList<>(Arrays.asList(ctxArr));
         fullCtx.addAll(Arrays.asList(frameworkCtx));
+        fullCtx.add(TRANSPORT_CTX_PREFIX + transportType + TRANSPORT_CTX_SUFFIX);
         LOGGER.debug("Starting node with " + fullCtx);
         final ClassPathXmlApplicationContext ctx = currentlyTracking
                 .track(new ClassPathXmlApplicationContext(fullCtx.toArray(new String[fullCtx.size()])));
