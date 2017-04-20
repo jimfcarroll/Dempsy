@@ -179,7 +179,11 @@
         <artifactId>slf4j-api</artifactId>
         <version>1.6.4</version>
       </dependency>
-      
+     <dependency>
+       <groupId>io.netty</groupId>
+       <artifactId>netty-all</artifactId>
+        <version>4.1.9.Final</version>
+     </dependency>
       <dependency>
         <groupId>org.quartz-scheduler</groupId>
         <artifactId>quartz</artifactId>

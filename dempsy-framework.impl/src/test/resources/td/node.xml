@@ -10,7 +10,7 @@
    <bean name="nodeStatsCollector" class="net.dempsy.monitoring.basic.BasicNodeStatsCollector" />
    
    <bean class="net.dempsy.config.Node" autowire="byType">
-     <constructor-arg value="test-app" />
+     <constructor-arg value="${test-name}" />
      <property name="clusterStatsCollectorFactoryId" value="net.dempsy.monitoring.basic" />
      <property name="nodeStatsCollector" ref="nodeStatsCollector" />
      <property name="defaultRoutingStrategyId" value="${routing-strategy}" />

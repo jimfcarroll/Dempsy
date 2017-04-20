@@ -49,6 +49,13 @@ public class TestWordCount extends DempsyBaseTest {
 
     public static final String wordResource = "word-count/AV1611Bible.txt.gz";
 
+    public static String readBible() throws IOException {
+        final InputStream is = new GZIPInputStream(new BufferedInputStream(WordProducer.class.getClassLoader().getResourceAsStream(wordResource)));
+        final StringWriter writer = new StringWriter();
+        IOUtils.copy(is, writer);
+        return writer.toString();
+    }
+
     public TestWordCount(final String routerId, final String containerId, final String sessCtx, final String tpid) {
         super(LOGGER, routerId, containerId, sessCtx, tpid);
     }
@@ -180,11 +187,7 @@ public class TestWordCount extends DempsyBaseTest {
 
         private synchronized static void setupStream() throws IOException {
             if (strings == null) {
-                final InputStream is = new GZIPInputStream(
-                        new BufferedInputStream(WordProducer.class.getClassLoader().getResourceAsStream(wordResource)));
-                final StringWriter writer = new StringWriter();
-                IOUtils.copy(is, writer);
-                strings = writer.toString().split("\\s+");
+                strings = readBible().split("\\s+");
             }
         }
     }
@@ -267,7 +270,7 @@ public class TestWordCount extends DempsyBaseTest {
             } };
 
             WordProducer.latch = new CountDownLatch(1); // need to make it wait.
-            runCombos(ctxs, n -> {
+            runCombos("testWordCountNoRank", ctxs, n -> {
                 final List<NodeManagerWithContext> nodes = n.nodes;
                 final NodeManager manager = nodes.get(0).manager;
                 final ClassPathXmlApplicationContext ctx = nodes.get(0).ctx;
@@ -298,7 +301,7 @@ public class TestWordCount extends DempsyBaseTest {
             } };
 
             WordProducer.latch = new CountDownLatch(1); // need to make it wait.
-            runCombos(ctxs, n -> {
+            runCombos("testWordCountWithRank", ctxs, n -> {
                 final List<NodeManagerWithContext> nodes = n.nodes;
                 final NodeManager manager = nodes.get(0).manager;
                 final ClassPathXmlApplicationContext ctx = nodes.get(0).ctx;
@@ -352,7 +355,7 @@ public class TestWordCount extends DempsyBaseTest {
             };
 
             WordProducer.latch = new CountDownLatch(1); // need to make it wait.
-            runCombos((r, c, s, t) -> !r.equals("simple"), ctxs, n -> {
+            runCombos("testWordCountNoRankMultinode", (r, c, s, t) -> !r.equals("simple"), ctxs, n -> {
                 final List<NodeManagerWithContext> nodes = n.nodes;
                 final NodeManager[] manager = Arrays.asList(nodes.get(0).manager, nodes.get(1).manager).toArray(new NodeManager[2]);
                 final ClassPathXmlApplicationContext[] ctx = Arrays.asList(nodes.get(0).ctx, nodes.get(1).ctx)

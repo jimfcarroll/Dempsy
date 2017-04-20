@@ -23,7 +23,7 @@ import net.dempsy.monitoring.NodeStatsCollector;
 /**
  * Abstraction to create multiple sender based on destination.
  */
-public interface SenderFactory extends AutoCloseable, Service {
+public interface SenderFactory extends Service {
 
     public Sender getSender(NodeAddress destination) throws MessageTransportException;
 

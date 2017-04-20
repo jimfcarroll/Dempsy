@@ -12,6 +12,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -34,6 +35,7 @@ import net.dempsy.router.microshard.MicroshardUtils;
 import net.dempsy.router.microshard.MicroshardUtils.ShardInfo;
 import net.dempsy.router.microshard.MicroshardingInbound;
 import net.dempsy.transport.NodeAddress;
+import net.dempsy.transport.blockingqueue.BlockingQueueAddress;
 import net.dempsy.utils.test.SystemPropertyManager;
 
 @Ignore
@@ -87,7 +89,7 @@ public class DempsyBaseTest {
         final String[] routers = { "simple", "microshard" };
         final String[] containers = { "locking", "nonlocking", "altnonlocking" };
         final String[] sessions = { "local", "zookeeper" };
-        final String[] transports = { "bq", "passthrough" };
+        final String[] transports = { "bq", "passthrough", "netty" };
 
         final List<Object[]> ret = new ArrayList<>();
         for (final String router : routers) {
@@ -152,11 +154,13 @@ public class DempsyBaseTest {
 
     }
 
-    protected void runCombos(final String[][] ctxs, final TestToRun test) throws Exception {
-        runCombos(null, ctxs, test);
+    protected void runCombos(final String testName, final String[][] ctxs, final TestToRun test) throws Exception {
+        runCombos(testName, null, ctxs, test);
     }
 
-    protected void runCombos(final ComboFilter filter, final String[][] ctxs, final TestToRun test) throws Exception {
+    private static AtomicLong runComboSequence = new AtomicLong(0);
+
+    protected void runCombos(final String testName, final ComboFilter filter, final String[][] ctxs, final TestToRun test) throws Exception {
         if (filter != null && !filter.filter(routerId, containerId, sessionType, transportType))
             return;
 
@@ -164,7 +168,8 @@ public class DempsyBaseTest {
             currentlyTracking = tr;
             tr.track(new SystemPropertyManager())
                     .set("routing-strategy", ROUTER_ID_PREFIX + routerId)
-                    .set("container-type", CONTAINER_ID_PREFIX + containerId);
+                    .set("container-type", CONTAINER_ID_PREFIX + containerId)
+                    .set("test-name", testName + "-" + runComboSequence.getAndIncrement());
 
             // instantiate session factory
             final ClusterInfoSessionFactory sessFact = tr
@@ -184,6 +189,7 @@ public class DempsyBaseTest {
         }
 
         LocalClusterSessionFactory.completeReset();
+        BlockingQueueAddress.completeReset();
     }
 
     @SuppressWarnings("resource")
@@ -213,7 +219,10 @@ public class DempsyBaseTest {
     protected void waitForEvenShardDistribution(final ClusterInfoSession session, final String cluster, final int numShardsToExpect,
             final int numNodes) throws InterruptedException {
         final MutableInt iters = new MutableInt();
-        final ClusterId clusterId = new ClusterId("test-app", cluster);
+        final String testName = System.getProperty("test-name");
+        if (testName == null)
+            throw new RuntimeException("test-name system property isn't set. Don't know the application name");
+        final ClusterId clusterId = new ClusterId(testName, cluster);
         final MicroshardUtils msutils = new MicroshardUtils(new RootPaths(clusterId.applicationName), clusterId, null);
         assertTrue(poll(o -> {
             try {

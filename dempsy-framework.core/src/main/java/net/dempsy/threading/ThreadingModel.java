@@ -38,7 +38,23 @@ public interface ThreadingModel extends AutoCloseable {
      */
     public <V> Future<V> schedule(Callable<V> r, long delay, TimeUnit timeUnit);
 
-    public void runDaemon(Runnable daemon, String name);
+    /**
+     * start a daemon process using this ThreadingModel. This defaults to using the 
+     * newThread call with the runnable and name and starting it. Note, this does NOT 
+     * set the thread to a daemon thread.
+     */
+    public default void runDaemon(final Runnable daemon, final String name) {
+        newThread(daemon, name).start();
+    }
+
+    /**
+     * start a thread to be used with the threading model. Defaults to simply creating
+     * a thread using with the runnable and name. Note, this does NOT set the thread
+     * to a daemon thread.
+     */
+    public default Thread newThread(final Runnable runnable, final String name) {
+        return new Thread(runnable, name);
+    }
 
     /**
      * How many pending tasks are there.

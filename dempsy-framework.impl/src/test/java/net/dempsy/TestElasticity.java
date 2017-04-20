@@ -225,7 +225,7 @@ public class TestElasticity extends DempsyBaseTest {
 
         final KeyExtractor ke = new KeyExtractor();
 
-        runCombos((r, c, s, t) -> "microshard".equals(r), actxPath, ns -> {
+        runCombos("testForProfiler", (r, c, s, t) -> "microshard".equals(r), actxPath, ns -> {
             final List<NodeManagerWithContext> nodes = ns.nodes;
             LOGGER.trace("==== Starting ...");
 
@@ -281,7 +281,7 @@ public class TestElasticity extends DempsyBaseTest {
     @Test
     public void testNumberCountDropOneAndReAdd() throws Throwable {
 
-        runCombos((r, c, s, t) -> "microshard".equals(r), actxPath, ns -> {
+        runCombos("testNumberCountDropOneAndReAdd", (r, c, s, t) -> "microshard".equals(r), actxPath, ns -> {
             // keepGoing is for the separate thread that pumps messages into the system.
             final AtomicBoolean keepGoing = new AtomicBoolean(true);
             try {
@@ -345,7 +345,7 @@ public class TestElasticity extends DempsyBaseTest {
 
     @Test
     public void testNumberCountAddOneThenDrop() throws Throwable {
-        runCombos((r, c, s, t) -> "microshard".equals(r), actxPath, ns -> {
+        runCombos("testNumberCountAddOneThenDrop", (r, c, s, t) -> "microshard".equals(r), actxPath, ns -> {
             // keepGoing is for the separate thread that pumps messages into the system.
             final AtomicBoolean keepGoing = new AtomicBoolean(true);
             try {

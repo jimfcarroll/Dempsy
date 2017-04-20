@@ -75,4 +75,11 @@ public class BlockingQueueAddress implements NodeAddress {
             queues.remove(guid);
         }
     }
+
+    public static void completeReset() {
+        synchronized (queues) {
+            queues.values().forEach(bq -> bq.clear());
+            queues.clear();
+        }
+    }
 }

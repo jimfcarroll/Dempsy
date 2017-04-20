@@ -92,7 +92,6 @@ public class Router extends Dispatcher implements Service {
             final Set<NodeInformation> leaveAlone = new HashSet<>();
 
             for (final NodeInformation cur : newState) {
-
                 final NodeInformation known = current.get(cur.nodeAddress);
                 if (known == null) // then we don't know about this one yet.
                     // we need to add this one
@@ -271,6 +270,9 @@ public class Router extends Dispatcher implements Service {
                     for (final String subdir : nodeDirs) {
                         final NodeInformation ni = (NodeInformation) session.getData(nodesDir + "/" + subdir, null);
 
+                        if (Router.this.thisNode.equals(ni.nodeAddress))
+                            continue; // skip this one.
+
                         if (ni == null) {
                             LOGGER.warn("A node directory was empty at " + subdir);
                             return false;
@@ -380,6 +382,13 @@ public class Router extends Dispatcher implements Service {
         public final int[] containers;
         public final Object key;
         public final Object message;
+
+        @SuppressWarnings("unused")
+        private RoutedMessage() {
+            containers = null;
+            key = null;
+            message = null;
+        }
 
         public RoutedMessage(final int[] containers, final Object key, final Object message) {
             this.containers = containers;

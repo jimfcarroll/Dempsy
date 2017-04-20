@@ -17,11 +17,11 @@
        <artifactId>dempsy-framework.core</artifactId>
      </dependency>
      <dependency>
-  <groupId>com.boundary</groupId>
-  <artifactId>high-scale-lib</artifactId>
-  <version>1.0.6</version>
-  
-  </dependency>
+       <groupId>io.netty</groupId>
+       <artifactId>netty-all</artifactId>
+     </dependency>
+     
+     <!-- Test dependencies -->
      <dependency>
        <groupId>org.springframework</groupId>
        <artifactId>spring-context</artifactId>
@@ -61,6 +61,11 @@
      <dependency>
         <groupId>net.dempsy</groupId>
         <artifactId>dempsy-serialization.jackson</artifactId>
+        <scope>test</scope>
+     </dependency>
+     <dependency>
+        <groupId>net.dempsy</groupId>
+        <artifactId>dempsy-serialization.kryo</artifactId>
         <scope>test</scope>
      </dependency>
    </dependencies>

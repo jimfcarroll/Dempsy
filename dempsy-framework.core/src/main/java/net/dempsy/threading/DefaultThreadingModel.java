@@ -185,11 +185,6 @@ public class DefaultThreadingModel implements ThreadingModel {
         return ret;
     }
 
-    @Override
-    public void runDaemon(final Runnable runnable, final String name) {
-        new Thread(runnable, name).start();
-    }
-
     private static class ProxyFuture<V> implements Future<V> {
         private volatile Future<V> ret;
         private volatile ScheduledFuture<?> schedFuture;

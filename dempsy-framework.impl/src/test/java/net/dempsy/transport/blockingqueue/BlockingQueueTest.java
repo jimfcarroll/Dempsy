@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package net.dempsy.messagetransport.blockingqueue;
+package net.dempsy.transport.blockingqueue;
 
 import static net.dempsy.util.Functional.chain;
 import static net.dempsy.utils.test.ConditionPoll.poll;

@@ -1,21 +1,19 @@
 package net.dempsy.transport.passthrough;
 
 import net.dempsy.monitoring.NodeStatsCollector;
-import net.dempsy.transport.Listener;
 import net.dempsy.transport.MessageTransportException;
 import net.dempsy.transport.Sender;
 
 public class PassthroughSender implements Sender {
-    private NodeStatsCollector statsCollector = null;
-    private Listener<Object> listener = null;
+    private final NodeStatsCollector statsCollector;
+    private final PassthroughSenderFactory owner;
     private boolean isRunning = true;
+    final PassthroughReceiver reciever;
 
-    void setStatsCollector(final NodeStatsCollector sc) {
+    PassthroughSender(final PassthroughReceiver r, final NodeStatsCollector sc, final PassthroughSenderFactory owner) {
+        this.reciever = r;
         this.statsCollector = sc;
-    }
-
-    void setListener(final Listener<Object> listener) {
-        this.listener = listener;
+        this.owner = owner;
     }
 
     @Override
@@ -26,7 +24,7 @@ public class PassthroughSender implements Sender {
             throw new MessageTransportException("send called on stopped PassthroughSender");
         }
 
-        listener.onMessage(message);
+        reciever.listener.onMessage(message);
         if (statsCollector != null)
             statsCollector.messageSent(message);
     }
@@ -34,5 +32,6 @@ public class PassthroughSender implements Sender {
     @Override
     public void stop() {
         isRunning = false;
+        owner.imDone(this);
     }
 }
