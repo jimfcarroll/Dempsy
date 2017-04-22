@@ -195,6 +195,7 @@ public class Node {
 
         final Set<ClusterId> clusterNames = new HashSet<ClusterId>();
 
+        boolean hasNonAdaptor = false;
         for (final Cluster clusterDef : clusters) {
             if (clusterDef == null)
                 throw new IllegalStateException("The application definition for \"" + application + "\" has a null ClusterDefinition.");
@@ -207,10 +208,14 @@ public class Node {
             clusterNames.add(clusterDef.getClusterId());
 
             clusterDef.validate();
+
+            if (!clusterDef.isAdaptor())
+                hasNonAdaptor = true;
         }
 
-        if (receiver == null)
-            throw new IllegalStateException("Cannot have a null reciever on a " + Node.class.getSimpleName());
+        if (hasNonAdaptor && getReceiver() == null)
+            throw new IllegalStateException("Cannot have a " + Node.class.getSimpleName() + " with a non-adaptor cluster but with no receiver.");
+
     }
 
     private void fillout(final Cluster cd) {

@@ -1,9 +1,10 @@
 package net.dempsy;
 
 import net.dempsy.container.Container;
+import net.dempsy.messages.KeyedMessageWithType;
 import net.dempsy.messages.MessageProcessorLifecycle;
 
-public class NodeManagerTestUtil {
+public class AccessUtil {
 
     public static Router getRouter(final NodeManager nm) {
         return nm.getRouter();
@@ -15,6 +16,10 @@ public class NodeManagerTestUtil {
 
     public static Container getContainer(final NodeManager nm, final String clusterName) {
         return nm.getContainer(clusterName);
+    }
+
+    public static boolean canReach(final Router router, final String cluterName, final KeyedMessageWithType message) {
+        return router.canReach(cluterName, message);
     }
 
 }

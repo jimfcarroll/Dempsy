@@ -24,12 +24,9 @@ import static org.junit.Assert.assertTrue;
 import java.lang.reflect.InvocationTargetException;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 
 import org.junit.Test;
 
-import net.dempsy.Infrastructure;
-import net.dempsy.cluster.ClusterInfoSession;
 import net.dempsy.config.ClusterId;
 import net.dempsy.container.ClusterMetricGetters;
 import net.dempsy.container.Container;
@@ -49,7 +46,7 @@ import net.dempsy.messages.MessageProcessorLifecycle;
 import net.dempsy.monitoring.NodeStatsCollector;
 import net.dempsy.monitoring.basic.BasicClusterStatsCollector;
 import net.dempsy.monitoring.basic.BasicNodeStatsCollector;
-import net.dempsy.util.executor.AutoDisposeSingleThreadScheduler;
+import net.dempsy.util.TestInfrastructure;
 
 public class TestInstanceManager {
 
@@ -249,31 +246,11 @@ public class TestInstanceManager {
 
         manager = (LockingContainer) new LockingContainer().setMessageProcessor(prototype).setClusterId(new ClusterId("test", "test"));
         manager.setDispatcher(dispatcher);
-        manager.start(new Infrastructure() {
+        manager.start(new TestInfrastructure(null, null) {
 
             @Override
             public BasicClusterStatsCollector getClusterStatsCollector(final ClusterId clusterId) {
                 return statsCollector;
-            }
-
-            @Override
-            public AutoDisposeSingleThreadScheduler getScheduler() {
-                return null;
-            }
-
-            @Override
-            public RootPaths getRootPaths() {
-                return null;
-            }
-
-            @Override
-            public ClusterInfoSession getCollaborator() {
-                return null;
-            }
-
-            @Override
-            public Map<String, String> getConfiguration() {
-                return null;
             }
 
             @Override

@@ -48,7 +48,8 @@ import net.dempsy.util.executor.AutoDisposeSingleThreadScheduler;
 import net.dempsy.utils.PersistentTask;
 
 /**
- * This Routing Strategy uses the MpCluster to negotiate with other instances in the cluster.
+ * This Routing Strategy uses the collaborator to negotiate for control over a 
+ * set of "micro shards" with other instances in the cluster.
  */
 public class MicroshardingInbound implements RoutingStrategy.Inbound {
 
@@ -120,13 +121,13 @@ public class MicroshardingInbound implements RoutingStrategy.Inbound {
 
     @Override
     public String toString() {
-        return "Inbound " + thisNodeAddress + clusterId + " owning " + destinationsAcquired;
+        return MicroshardingInbound.class.getSimpleName() + " at " + thisNodeAddress + " for " + clusterId + " owning " + destinationsAcquired;
     }
 
     private String nodeDirectory = null;
 
     // ==============================================================================
-    // This PersistentTask watches the shards directory for chagnes and will make
+    // This PersistentTask watches the shards directory for changes and will make
     // make sure that the
     // ==============================================================================
     private PersistentTask getShardChangeWatcher() {
@@ -135,7 +136,7 @@ public class MicroshardingInbound implements RoutingStrategy.Inbound {
 
             @Override
             public String toString() {
-                return "determine the shard distribution and acquire new ones or relinquish some as necessary for " + clusterId;
+                return "determin and participate in shard distribution for " + clusterId + " from " + thisNodeAddress.node;
             }
 
             private final void checkNodeDirectory() throws ClusterInfoException {
@@ -207,7 +208,7 @@ public class MicroshardingInbound implements RoutingStrategy.Inbound {
                     checkNodeDirectory();
 
                     final int currentWorkingNodeCount = findWorkingNodeCount(session, msutils, minNumberOfNodes, null);
-                    final int acquireUpToThisMany = (int) Math.floor((double) totalNumShards / (double) currentWorkingNodeCount);
+                    final int acquireUpToThisMany = Math.floorDiv(totalNumShards, currentWorkingNodeCount);
                     final int releaseDownToThisMany = (int) Math.ceil((double) totalNumShards / (double) currentWorkingNodeCount);
 
                     // we are rebalancing the shards so we will figure out what we are removing
@@ -493,7 +494,7 @@ public class MicroshardingInbound implements RoutingStrategy.Inbound {
     private final static List<Integer> range(final Collection<String> curSubdirs, final int max) {
         final List<Integer> ret = new ArrayList<Integer>(max);
         for (int i = 0; i < max; i++) {
-            if (!curSubdirs.contains(i))
+            if (!curSubdirs.contains(Integer.toString(i)))
                 ret.add(i);
         }
         return ret;

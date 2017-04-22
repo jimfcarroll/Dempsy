@@ -156,7 +156,7 @@ public class LockingContainer extends Container {
     // Internals
     // ----------------------------------------------------------------------------
 
-    protected static class InstanceWrapper {
+    protected class InstanceWrapper {
         private final Object instance;
         private final Semaphore lock = new Semaphore(1, true); // basically a mutex
         private boolean evicted = false;
@@ -182,7 +182,11 @@ public class LockingContainer extends Container {
                     try {
                         lock.acquire();
                         gotLock = true;
-                    } catch (final InterruptedException e) {}
+                    } catch (final InterruptedException e) {
+                        if (!isRunning) {
+                            throw new DempsyException("Stopped");
+                        }
+                    }
                 }
             } else {
                 if (!lock.tryAcquire())
@@ -679,14 +683,14 @@ public class LockingContainer extends Container {
      */
     private void invokeOperation(final Object instance, final Operation op, final KeyedMessage message) {
         if (instance != null) { // possibly passivated ...
+            List<KeyedMessageWithType> result;
             try {
                 statCollector.messageDispatched(message);
-                final List<KeyedMessageWithType> result = op == Operation.output ? prototype.invokeOutput(instance)
+                result = op == Operation.output ? prototype.invokeOutput(instance)
                         : prototype.invoke(instance, message);
                 statCollector.messageProcessed(message);
-                if (result != null)
-                    dispatcher.dispatch(result);
             } catch (final ContainerException e) {
+                result = null;
                 LOGGER.warn("the container for " + clusterId + " failed to invoke " + op + " on the message processor " +
                         SafeString.valueOf(prototype) + (op == Operation.handle ? (" with " + objectDescription(message)) : ""), e);
                 statCollector.messageFailed(false);
@@ -694,6 +698,7 @@ public class LockingContainer extends Container {
             // this is an exception thrown as a result of the reflected call having an illegal argument.
             // This should actually be impossible since the container itself manages the calling.
             catch (final IllegalArgumentException e) {
+                result = null;
                 LOGGER.error("the container for " + clusterId + " failed when trying to invoke " + op + " on " + objectDescription(instance) +
                         " due to a declaration problem. Are you sure the method takes the type being routed to it? If this is an output operation are you sure the output method doesn't take any arguments?",
                         e);
@@ -701,18 +706,27 @@ public class LockingContainer extends Container {
             }
             // The app threw an exception.
             catch (final DempsyException e) {
+                result = null;
                 LOGGER.warn("the container for " + clusterId + " failed when trying to invoke " + op + " on " + objectDescription(instance) +
-                        " because an exception was thrown by the Message Processeor itself.", e.getCause());
+                        " because an exception was thrown by the Message Processeor itself.", e);
                 statCollector.messageFailed(true);
             }
             // RuntimeExceptions bookeeping
             catch (final RuntimeException e) {
+                result = null;
                 LOGGER.error("the container for " + clusterId + " failed when trying to invoke " + op + " on " + objectDescription(instance) +
                         " due to an unknown exception.", e);
                 statCollector.messageFailed(false);
 
                 if (op == Operation.handle)
                     throw e;
+            }
+            if (result != null) {
+                try {
+                    dispatcher.dispatch(result);
+                } catch (final Exception de) {
+                    LOGGER.warn("Failed on subsequent dispatch of " + result + ": " + de.getLocalizedMessage());
+                }
             }
         }
     }

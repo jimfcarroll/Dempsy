@@ -2,6 +2,7 @@ package net.dempsy;
 
 import static net.dempsy.util.Functional.chain;
 import static net.dempsy.util.Functional.uncheck;
+import static net.dempsy.utils.test.ConditionPoll.assertTrue;
 import static net.dempsy.utils.test.ConditionPoll.poll;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
@@ -17,16 +18,19 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
-import org.junit.Before;
 import org.junit.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import net.dempsy.cluster.ClusterInfoSession;
+import net.dempsy.container.NodeMetricGetters;
 import net.dempsy.lifecycle.annotation.Activation;
 import net.dempsy.lifecycle.annotation.MessageHandler;
 import net.dempsy.lifecycle.annotation.MessageKey;
+import net.dempsy.lifecycle.annotation.MessageProcessor;
 import net.dempsy.lifecycle.annotation.MessageType;
 import net.dempsy.lifecycle.annotation.Mp;
 import net.dempsy.lifecycle.annotation.utils.KeyExtractor;
@@ -48,11 +52,6 @@ public class TestElasticity extends DempsyBaseTest {
 
     public TestElasticity(final String routerId, final String containerId, final String sessCtx, final String tpCtx) {
         super(LOGGER, routerId, containerId, sessCtx, tpCtx);
-    }
-
-    @Before
-    public void reset() {
-        NumberCounter.messageCount.set(0);
     }
 
     // ========================================================================
@@ -143,7 +142,8 @@ public class TestElasticity extends DempsyBaseTest {
 
     @Mp
     public static class NumberCounter implements Cloneable {
-        public static AtomicLong messageCount = new AtomicLong(0);
+        // This will be shared among them all in a container due to the cloning semantics
+        public AtomicLong messageCount = new AtomicLong(0);
         long counter = 0;
         String wordText;
 
@@ -194,7 +194,6 @@ public class TestElasticity extends DempsyBaseTest {
 
         @MessageHandler
         public void handle(final NumberCount wordCount) {
-            LOGGER.trace("NumberRank received {}", wordCount);
             totalMessages.incrementAndGet();
             countMap.get()[wordCount.rankIndex].put(wordCount.number, wordCount.count);
         }
@@ -217,51 +216,98 @@ public class TestElasticity extends DempsyBaseTest {
 
     @Test
     public void testForProfiler() throws Throwable {
-        // set up the test.
-        final Number[] numbers = new Number[profilerTestNumberCount];
-        final Random random = new Random();
-        for (int i = 0; i < numbers.length; i++)
-            numbers[i] = new Number(random.nextInt(1000), 0);
+        try {
+            // set up the test.
+            final Number[] numbers = new Number[profilerTestNumberCount];
+            final Random random = new Random();
+            for (int i = 0; i < numbers.length; i++)
+                numbers[i] = new Number(random.nextInt(1000), 0);
 
-        final KeyExtractor ke = new KeyExtractor();
+            final KeyExtractor ke = new KeyExtractor();
 
-        runCombos("testForProfiler", (r, c, s, t) -> "microshard".equals(r), actxPath, ns -> {
-            final List<NodeManagerWithContext> nodes = ns.nodes;
-            LOGGER.trace("==== Starting ...");
-
-            // Grab the one NumberRank Mp from the single Node in the third (0 base 2nd) cluster.
-            final NumberRank rank = nodes.get(4).ctx.getBean(NumberRank.class);
-
-            try (final ClusterInfoSession session = ns.sessionFactory.createSession();) {
-                waitForEvenShardDistribution(session, "test-cluster1", 3);
-
-                // grab the adaptor from the 0'th cluster + the 0'th (only) node.
-                final NumberProducer adaptor = nodes.get(0).ctx.getBean(NumberProducer.class);
-
-                // grab access to the Dispatcher from the Adaptor
-                final Dispatcher dispatcher = adaptor.dispatcher;
-
-                final long startTime = System.currentTimeMillis();
-
-                for (int i = 0; i < numbers.length; i++)
-                    dispatcher.dispatch(ke.extract(numbers[i]));
-
-                LOGGER.trace("====> Checking exact count.");
-
-                // keep going as long as they are trickling in.
-                long lastNumberOfMessages = -1;
-                while (rank.totalMessages.get() > lastNumberOfMessages) {
-                    lastNumberOfMessages = rank.totalMessages.get();
-                    if (poll(rank.totalMessages, o -> o.get() == profilerTestNumberCount))
-                        break;
+            runCombos("testForProfiler", (r, c, s, t) -> {
+                final boolean ret = "microshard".equals(r);
+                if (ret) {
+                    LOGGER.info("=====================================================================================");
+                    LOGGER.info("======== Running testForProfiler with " + r + ", " + c + ", " + s + ", " + t);
                 }
+                return ret;
+            }, actxPath, new String[][][] {
+                    null,
+                    { { "min_nodes", "3" } },
+                    { { "min_nodes", "3" } },
+                    { { "min_nodes", "3" } },
+                    null,
+            }, ns -> {
+                final List<NodeManagerWithContext> nodes = ns.nodes;
 
-                LOGGER.trace("testForProfiler time " + (System.currentTimeMillis() - startTime));
+                // Grab the one NumberRank Mp from the single Node in the third (0 base 2nd) cluster.
+                final NumberRank rank = nodes.get(4).ctx.getBean(NumberRank.class);
 
-                assertEquals(profilerTestNumberCount, rank.totalMessages.get());
-                assertEquals(profilerTestNumberCount, NumberCounter.messageCount.get());
-            }
-        });
+                try (final ClusterInfoSession session = ns.sessionFactory.createSession();) {
+                    waitForEvenShardDistribution(session, "test-cluster1", 3, nodes);
+
+                    // get the Adaptor Router's statCollector
+                    final List<NodeMetricGetters> scs = nodes.stream()
+                            .map(nwm -> nwm.manager)
+                            .map(nm -> nm.getNodeStatsCollector())
+                            .map(sc -> (NodeMetricGetters) sc)
+                            .collect(Collectors.toList());
+
+                    // grab the adaptor from the 0'th cluster + the 0'th (only) node.
+                    final NumberProducer adaptor = nodes.get(0).ctx.getBean(NumberProducer.class);
+
+                    // grab access to the Dispatcher from the Adaptor
+                    final Dispatcher dispatcher = adaptor.dispatcher;
+
+                    final long startTime = System.currentTimeMillis();
+
+                    for (int i = 0; i < numbers.length; i++)
+                        dispatcher.dispatch(ke.extract(numbers[i]));
+
+                    LOGGER.info("====> Checking exact count.");
+
+                    // keep going as long as they are trickling in.
+                    assertTrue(
+                            () -> {
+                                IntStream.range(0, scs.size()).forEach(i -> {
+                                    System.out.println("======> " + i);
+                                    final NodeMetricGetters mg = scs.get(i);
+                                    if (mg != null) {
+                                        System.out.println("discarded: " + mg.getDiscardedMessageCount());
+                                        System.out.println("not sent: " + mg.getMessagesNotSentCount());
+                                    }
+                                });
+                                return "expected: " + profilerTestNumberCount + " but was: "
+                                        + (rank.totalMessages.get() + scs.get(0).getMessagesNotSentCount())
+                                        + ", (delivered: " + rank.totalMessages.get() + ", not sent: " + scs.get(0).getMessagesNotSentCount() + ")";
+                            },
+                            poll(o -> profilerTestNumberCount == (rank.totalMessages.get() + scs.stream()
+                                    .map(sc -> new Long(sc.getMessagesNotSentCount()))
+                                    .reduce(new Long(0), (v1, v2) -> new Long(v1.longValue() + v2.longValue()).longValue()))));
+
+                    // assert that at least SOMETHING went through
+                    assertTrue(rank.totalMessages.get() > 0);
+
+                    LOGGER.info("testForProfiler time " + (System.currentTimeMillis() - startTime));
+
+                    @SuppressWarnings("unchecked")
+                    final AtomicLong count = nodes.stream()
+                            .map(nmwc -> (MessageProcessor<NumberCounter>) nmwc.manager.getMp("test-cluster1")) // get the NumberCounter Mp
+                            .filter(l -> l != null) // if it exists
+                            .map(l -> l.getPrototype().messageCount) // pull the prototype
+                            .reduce(new AtomicLong(0), (v1, v2) -> new AtomicLong(v1.get() + v2.get())); // sum up all of the counts
+
+                    assertEquals(profilerTestNumberCount, count.get());
+
+                } finally {
+                    LOGGER.info("=====================================================================================");
+                }
+            });
+        } catch (final Throwable th) {
+            th.printStackTrace();
+            throw th;
+        }
     }
 
     final static KeyExtractor ke = new KeyExtractor();
@@ -287,7 +333,7 @@ public class TestElasticity extends DempsyBaseTest {
             try {
                 LOGGER.trace("==== <- Starting");
 
-                final List<NodeManagerWithContext> nodes = ns.nodes;
+                final List<NodeManagerWithContext> nodes = new ArrayList<>(ns.nodes);
 
                 // grab the adaptor from the 0'th cluster + the 0'th (only) node.
                 final NumberProducer adaptor = nodes.get(0).ctx.getBean(NumberProducer.class);
@@ -311,7 +357,7 @@ public class TestElasticity extends DempsyBaseTest {
                 };
 
                 try (final ClusterInfoSession session = ns.sessionFactory.createSession();) {
-                    waitForEvenShardDistribution(session, "test-cluster1", 3);
+                    waitForEvenShardDistribution(session, "test-cluster1", 3, ns.nodes);
 
                     // Grab the one NumberRank Mp from the single Node in the third (0 base 2nd) cluster.
                     final NumberRank rank = nodes.get(4).ctx.getBean(NumberRank.class);
@@ -319,10 +365,10 @@ public class TestElasticity extends DempsyBaseTest {
                     runACycle(keepGoing, rankIndexToSend.get(), rank, sendMessages);
 
                     // now kill a node.
-                    final NodeManagerWithContext nm = nodes.get(2);
+                    final NodeManagerWithContext nm = nodes.remove(2);
                     LOGGER.trace("==== Stopping middle node servicing shards ");
                     nm.manager.stop();
-                    waitForEvenShardDistribution(session, "test-cluster1", 2);
+                    waitForEvenShardDistribution(session, "test-cluster1", 2, nodes);
                     LOGGER.trace("==== Stopped middle Dempsy");
 
                     // make sure everything still goes through
@@ -330,8 +376,8 @@ public class TestElasticity extends DempsyBaseTest {
 
                     // now, bring online another instance.
                     LOGGER.trace("==== starting a new one");
-                    makeNode(new String[] { "elasticity/mp-num-count.xml" });
-                    waitForEvenShardDistribution(session, "test-cluster1", 3);
+                    nodes.add(makeNode(new String[] { "elasticity/mp-num-count.xml" }));
+                    waitForEvenShardDistribution(session, "test-cluster1", 3, nodes);
 
                     // make sure everything still goes through
                     runACycle(keepGoing, rankIndexToSend.incrementAndGet(), rank, sendMessages);
@@ -351,7 +397,7 @@ public class TestElasticity extends DempsyBaseTest {
             try {
                 LOGGER.trace("==== <- Starting");
 
-                final List<NodeManagerWithContext> nodes = ns.nodes;
+                final List<NodeManagerWithContext> nodes = new ArrayList<>(ns.nodes);
 
                 // grab the adaptor from the 0'th cluster + the 0'th (only) node.
                 final NumberProducer adaptor = nodes.get(0).ctx.getBean(NumberProducer.class);
@@ -375,7 +421,7 @@ public class TestElasticity extends DempsyBaseTest {
                 };
 
                 try (final ClusterInfoSession session = ns.sessionFactory.createSession();) {
-                    waitForEvenShardDistribution(session, "test-cluster1", 3);
+                    waitForEvenShardDistribution(session, "test-cluster1", 3, nodes);
 
                     // Grab the one NumberRank Mp from the single Node in the third (0 base 2nd) cluster.
                     final NumberRank rank = nodes.get(4).ctx.getBean(NumberRank.class);
@@ -384,17 +430,17 @@ public class TestElasticity extends DempsyBaseTest {
 
                     // now, bring online another instance.
                     LOGGER.trace("==== starting a new one");
-                    makeNode(new String[] { "elasticity/mp-num-count.xml" });
-                    waitForEvenShardDistribution(session, "test-cluster1", 4);
+                    nodes.add(makeNode(new String[] { "elasticity/mp-num-count.xml" }));
+                    waitForEvenShardDistribution(session, "test-cluster1", 4, nodes);
 
                     // make sure everything still goes through
                     runACycle(keepGoing, rankIndexToSend.incrementAndGet(), rank, sendMessages);
 
                     // now kill a node.
-                    final NodeManagerWithContext nm = nodes.get(2);
+                    final NodeManagerWithContext nm = nodes.remove(2);
                     LOGGER.trace("==== Stopping middle node servicing shards ");
                     nm.manager.stop();
-                    waitForEvenShardDistribution(session, "test-cluster1", 3);
+                    waitForEvenShardDistribution(session, "test-cluster1", 3, nodes);
                     LOGGER.trace("==== Stopped middle Dempsy");
 
                     // make sure everything still goes through

@@ -54,4 +54,9 @@ public class TestInfrastructure implements Infrastructure {
     public NodeStatsCollector getNodeStatsCollector() {
         return nodeStats;
     }
+
+    @Override
+    public String getNodeId() {
+        return "test-infrastructure-fake-node-id";
+    }
 }

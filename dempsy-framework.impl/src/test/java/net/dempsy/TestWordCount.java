@@ -281,7 +281,7 @@ public class TestWordCount extends DempsyBaseTest {
                 WordProducer.latch.countDown();
 
                 adaptor = ctx.getBean(WordProducer.class);
-                stats = (ClusterMetricGetters) manager.getClusterStatsCollector(new ClusterId("test-app", "test-cluster1"));
+                stats = (ClusterMetricGetters) manager.getClusterStatsCollector(new ClusterId(currentAppName, "test-cluster1"));
 
                 assertTrue(poll(o -> adaptor.done.get()));
                 assertTrue(poll(o -> adaptor.numDispatched == stats.getProcessedMessageCount()));
@@ -312,20 +312,20 @@ public class TestWordCount extends DempsyBaseTest {
                 WordProducer.latch.countDown();
 
                 adaptor = ctx.getBean(WordProducer.class);
-                stats = (ClusterMetricGetters) manager.getClusterStatsCollector(new ClusterId("test-app", "test-cluster1"));
+                stats = (ClusterMetricGetters) manager.getClusterStatsCollector(new ClusterId(currentAppName, "test-cluster1"));
 
                 assertTrue(poll(o -> adaptor.done.get()));
                 assertTrue(poll(o -> adaptor.numDispatched == stats.getProcessedMessageCount()));
 
                 // wait until all of the counts are also passed to WordRank
                 final ClusterMetricGetters wrStats = (ClusterMetricGetters) manager
-                        .getClusterStatsCollector(new ClusterId("test-app", "test-cluster2"));
+                        .getClusterStatsCollector(new ClusterId(currentAppName, "test-cluster2"));
                 assertTrue(poll(wrStats, s -> adaptor.numDispatched == s.getProcessedMessageCount()));
 
                 stopSystem();
 
                 // pull the Rank mp from the manager
-                final MessageProcessorLifecycle<?> mp = NodeManagerTestUtil.getMp(manager, "test-cluster2");
+                final MessageProcessorLifecycle<?> mp = AccessUtil.getMp(manager, "test-cluster2");
                 @SuppressWarnings("unchecked")
                 final WordRank prototype = ((MessageProcessor<WordRank>) mp).getPrototype();
                 final List<Rank> ranks = prototype.getPairs();
@@ -365,8 +365,44 @@ public class TestWordCount extends DempsyBaseTest {
 
                 final WordProducer adaptor = ctx[0].getBean(WordProducer.class);
                 final ClusterMetricGetters[] stats = Arrays.asList(
-                        (ClusterMetricGetters) manager[0].getClusterStatsCollector(new ClusterId("test-app", "test-cluster1")),
-                        (ClusterMetricGetters) manager[1].getClusterStatsCollector(new ClusterId("test-app", "test-cluster1")))
+                        (ClusterMetricGetters) manager[0].getClusterStatsCollector(new ClusterId(currentAppName, "test-cluster1")),
+                        (ClusterMetricGetters) manager[1].getClusterStatsCollector(new ClusterId(currentAppName, "test-cluster1")))
+                        .toArray(new ClusterMetricGetters[2]);
+
+                assertTrue(poll(o -> adaptor.done.get()));
+                assertTrue(poll(o -> {
+                    // System.out.println(stats[0].getProcessedMessageCount() + ", " + stats[1].getProcessedMessageCount());
+                    return adaptor.numDispatched == Arrays.stream(stats).map(c -> c.getProcessedMessageCount())
+                            .reduce((c1, c2) -> c1.longValue() + c2.longValue()).get().longValue();
+                }));
+            });
+        }
+    }
+
+    @Test
+    public void testWordCountNoRankAdaptorOnlyNode() throws Throwable {
+        try (@SuppressWarnings("resource")
+        final SystemPropertyManager props = new SystemPropertyManager().set("min_nodes", "2")) {
+
+            final String[][] ctxs = {
+                    { "classpath:/word-count/adaptor-kjv.xml", }, // adaptor only node
+                    { "classpath:/word-count/mp-word-count.xml", },
+                    { "classpath:/word-count/mp-word-count.xml", },
+            };
+
+            WordProducer.latch = new CountDownLatch(1); // need to make it wait.
+            runCombos("testWordCountNoRankMultinode", (r, c, s, t) -> !r.equals("simple"), ctxs, n -> {
+                final List<NodeManagerWithContext> nodes = n.nodes;
+                final NodeManager[] manager = Arrays.asList(nodes.get(1).manager, nodes.get(2).manager).toArray(new NodeManager[2]);
+                final ClassPathXmlApplicationContext[] ctx = Arrays.asList(nodes.get(0).ctx, nodes.get(1).ctx)
+                        .toArray(new ClassPathXmlApplicationContext[2]);
+
+                WordProducer.latch.countDown();
+
+                final WordProducer adaptor = ctx[0].getBean(WordProducer.class);
+                final ClusterMetricGetters[] stats = Arrays.asList(
+                        (ClusterMetricGetters) manager[0].getClusterStatsCollector(new ClusterId(currentAppName, "test-cluster1")),
+                        (ClusterMetricGetters) manager[1].getClusterStatsCollector(new ClusterId(currentAppName, "test-cluster1")))
                         .toArray(new ClusterMetricGetters[2]);
 
                 assertTrue(poll(o -> adaptor.done.get()));

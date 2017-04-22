@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 
+import net.dempsy.Infrastructure;
 import net.dempsy.monitoring.NodeStatsCollector;
 import net.dempsy.transport.MessageTransportException;
 import net.dempsy.transport.NodeAddress;
@@ -14,6 +15,7 @@ public class NettySenderFactory implements SenderFactory {
     private final ConcurrentHashMap<TcpAddress, NettySender> senders = new ConcurrentHashMap<>();
     private NodeStatsCollector statsCollector;
     private boolean running = true;
+    String nodeId;
 
     @Override
     public void close() {
@@ -47,8 +49,9 @@ public class NettySenderFactory implements SenderFactory {
     }
 
     @Override
-    public void setStatsCollector(final NodeStatsCollector statsCollector) {
-        this.statsCollector = statsCollector;
+    public void start(final Infrastructure infra) {
+        this.statsCollector = infra.getNodeStatsCollector();
+        this.nodeId = infra.getNodeId();
     }
 
     void imDone(final TcpAddress tcp) {

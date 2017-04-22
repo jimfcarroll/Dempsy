@@ -5,6 +5,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import net.dempsy.Infrastructure;
 import net.dempsy.monitoring.NodeStatsCollector;
 import net.dempsy.transport.MessageTransportException;
 import net.dempsy.transport.NodeAddress;
@@ -40,8 +41,8 @@ public class PassthroughSenderFactory implements SenderFactory {
     }
 
     @Override
-    public void setStatsCollector(final NodeStatsCollector statsCollector) {
-        this.statsCollector = statsCollector;
+    public void start(final Infrastructure infra) {
+        this.statsCollector = infra.getNodeStatsCollector();
     }
 
     synchronized void imDone(final PassthroughSender sender) {

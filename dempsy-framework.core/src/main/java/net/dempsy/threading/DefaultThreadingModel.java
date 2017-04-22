@@ -10,31 +10,42 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Supplier;
 
 public class DefaultThreadingModel implements ThreadingModel {
+    private static final int minNumThreads = 4;
+
     private ScheduledExecutorService schedule = null;
     private ThreadPoolExecutor executor = null;
     private AtomicLong numLimited = null;
-    private long maxNumWaitingLimitedTasks = -1;
-    private int threadPoolSize = -1;
-    private static final int minNumThreads = 4;
+    private long maxNumWaitingLimitedTasks;
+    private int threadPoolSize;
 
     private double m = 1.25;
     private int additionalThreads = 2;
 
-    private final String threadNameBase;
+    private final Supplier<String> nameSupplier;
+    private boolean hardShutdown = false;
+
+    public DefaultThreadingModel(final Supplier<String> nameSupplier, final int threadPoolSize, final int maxNumWaitingLimitedTasks) {
+        this.nameSupplier = nameSupplier;
+        this.threadPoolSize = threadPoolSize;
+        this.maxNumWaitingLimitedTasks = maxNumWaitingLimitedTasks;
+    }
+
+    public DefaultThreadingModel(final Supplier<String> nameSupplier) {
+        this(nameSupplier, -1, -1);
+    }
 
     public DefaultThreadingModel(final String threadNameBase) {
-        this.threadNameBase = threadNameBase;
+        this(new NameSupplier(threadNameBase));
     }
 
     /**
      * Create a DefaultDempsyExecutor with a fixed number of threads while setting the maximum number of limited tasks.
      */
     public DefaultThreadingModel(final String threadNameBase, final int threadPoolSize, final int maxNumWaitingLimitedTasks) {
-        this.threadPoolSize = threadPoolSize;
-        this.maxNumWaitingLimitedTasks = maxNumWaitingLimitedTasks;
-        this.threadNameBase = threadNameBase;
+        this(new NameSupplier(threadNameBase), threadPoolSize, maxNumWaitingLimitedTasks);
     }
 
     /**
@@ -73,7 +84,10 @@ public class DefaultThreadingModel implements ThreadingModel {
         return this;
     }
 
-    private final static AtomicLong threadNum = new AtomicLong();
+    public DefaultThreadingModel setHardShutdown(final boolean hardShutdown) {
+        this.hardShutdown = hardShutdown;
+        return this;
+    }
 
     @Override
     public DefaultThreadingModel start() {
@@ -85,8 +99,8 @@ public class DefaultThreadingModel implements ThreadingModel {
             threadPoolSize = Math.max(cpuBasedThreadCount, minNumThreads);
         }
         executor = (ThreadPoolExecutor) Executors.newFixedThreadPool(threadPoolSize,
-                r -> new Thread(r, threadNameBase + threadNum.getAndIncrement()));
-        schedule = Executors.newSingleThreadScheduledExecutor();
+                r -> new Thread(r, nameSupplier.get()));
+        schedule = Executors.newSingleThreadScheduledExecutor(r -> new Thread(r, nameSupplier.get() + "-Scheduled"));
         numLimited = new AtomicLong(0);
 
         if (maxNumWaitingLimitedTasks < 0)
@@ -111,11 +125,19 @@ public class DefaultThreadingModel implements ThreadingModel {
 
     @Override
     public void close() {
-        if (executor != null)
-            executor.shutdown();
+        if (hardShutdown) {
+            if (executor != null)
+                executor.shutdownNow();
 
-        if (schedule != null)
-            schedule.shutdown();
+            if (schedule != null)
+                schedule.shutdownNow();
+        } else {
+            if (executor != null)
+                executor.shutdown();
+
+            if (schedule != null)
+                schedule.shutdown();
+        }
     }
 
     @Override
@@ -232,4 +254,17 @@ public class DefaultThreadingModel implements ThreadingModel {
         }
     }
 
+    public static class NameSupplier implements Supplier<String> {
+        private final static AtomicLong threadNum = new AtomicLong();
+        private final String threadNameBase;
+
+        public NameSupplier(final String threadBaseName) {
+            this.threadNameBase = threadBaseName;
+        }
+
+        @Override
+        public String get() {
+            return threadNameBase + threadNum.getAndIncrement();
+        }
+    }
 }

@@ -7,9 +7,9 @@
 
    <context:property-placeholder system-properties-mode="OVERRIDE"/>
    
-   <bean id="serializer" class="net.dempsy.serialization.kryo.KryoSerializer" />
+   <bean id="serializer" class="net.dempsy.serialization.jackson.JsonSerializer" />
  
-   <bean id="inputTransport" class="net.dempsy.transport.tcp.netty.NettyReceiver" >
+   <bean id="inputTransport" class="net.dempsy.transport.tcp.netty.NettyReceiver" destroy-method="close">
      <constructor-arg ref="serializer" />
    </bean>
 

@@ -11,6 +11,7 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
@@ -33,7 +34,6 @@ import net.dempsy.config.ClusterId;
 import net.dempsy.config.Node;
 import net.dempsy.router.microshard.MicroshardUtils;
 import net.dempsy.router.microshard.MicroshardUtils.ShardInfo;
-import net.dempsy.router.microshard.MicroshardingInbound;
 import net.dempsy.transport.NodeAddress;
 import net.dempsy.transport.blockingqueue.BlockingQueueAddress;
 import net.dempsy.utils.test.SystemPropertyManager;
@@ -41,11 +41,11 @@ import net.dempsy.utils.test.SystemPropertyManager;
 @Ignore
 @RunWith(Parameterized.class)
 public class DempsyBaseTest {
-    // /**
-    // * Setting 'hardcore' to true causes EVERY SINGLE IMPLEMENTATION COMBINATION to be used in
-    // * every runAllCombinations call. This can make tests run for a loooooong time.
-    // */
-    // public static boolean hardcore = false;
+    /**
+    * Setting 'hardcore' to true causes EVERY SINGLE IMPLEMENTATION COMBINATION to be used in
+    * every runAllCombinations call. This can make tests run for a loooooong time.
+    */
+    public static boolean hardcore = true;
 
     protected Logger LOGGER;
 
@@ -74,6 +74,7 @@ public class DempsyBaseTest {
     protected static final String COLLAB_CTX_SUFFIX = ".xml";
     protected static final String TRANSPORT_CTX_PREFIX = "classpath:/td/transport-";
     protected static final String TRANSPORT_CTX_SUFFIX = ".xml";
+    protected static final int NUM_MICROSHARDS = 12;
 
     protected DempsyBaseTest(final Logger logger, final String routerId, final String containerId,
             final String sessionType, final String transportType) {
@@ -84,18 +85,47 @@ public class DempsyBaseTest {
         this.transportType = transportType;
     }
 
+    private static class Combos {
+        final String[] routers;
+        final String[] containers;
+        final String[] sessions;
+        final String[] transports;
+
+        public Combos(final String[] routers, final String[] containers, final String[] sessions, final String[] transports) {
+            this.routers = routers;
+            this.containers = containers;
+            this.sessions = sessions;
+            this.transports = transports;
+        }
+    }
+
+    public static Combos hardcore() {
+        return new Combos(
+                new String[] { "simple", "microshard" },
+                new String[] { "locking", "nonlocking", "altnonlocking" },
+                new String[] { "local", "zookeeper" },
+                new String[] { "bq", "passthrough", "netty" });
+
+    }
+
+    public static Combos production() {
+        return new Combos(
+                new String[] { "microshard" },
+                new String[] { "altnonlocking" },
+                new String[] { "zookeeper" },
+                new String[] { "netty" });
+
+    }
+
     @Parameters(name = "{index}: routerId={0}, container={1}, cluster={2}, transport={3}")
     public static Collection<Object[]> combos() {
-        final String[] routers = { "simple", "microshard" };
-        final String[] containers = { "locking", "nonlocking", "altnonlocking" };
-        final String[] sessions = { "local", "zookeeper" };
-        final String[] transports = { "bq", "passthrough", "netty" };
+        final Combos combos = (hardcore) ? hardcore() : production();
 
         final List<Object[]> ret = new ArrayList<>();
-        for (final String router : routers) {
-            for (final String container : containers) {
-                for (final String sessFact : sessions) {
-                    for (final String tp : transports) {
+        for (final String router : combos.routers) {
+            for (final String container : combos.containers) {
+                for (final String sessFact : combos.sessions) {
+                    for (final String tp : combos.transports) {
                         ret.add(new Object[] { router, container, sessFact, tp });
                     }
                 }
@@ -155,21 +185,30 @@ public class DempsyBaseTest {
     }
 
     protected void runCombos(final String testName, final String[][] ctxs, final TestToRun test) throws Exception {
-        runCombos(testName, null, ctxs, test);
+        runCombos(testName, null, ctxs, null, test);
     }
 
     private static AtomicLong runComboSequence = new AtomicLong(0);
+    protected static String currentAppName = null;
 
     protected void runCombos(final String testName, final ComboFilter filter, final String[][] ctxs, final TestToRun test) throws Exception {
+        runCombos(testName, filter, ctxs, null, test);
+    }
+
+    protected void runCombos(final String testName, final ComboFilter filter, final String[][] ctxs, final String[][][] perNodeProps,
+            final TestToRun test) throws Exception {
         if (filter != null && !filter.filter(routerId, containerId, sessionType, transportType))
             return;
+
+        currentAppName = testName + "-" + runComboSequence.getAndIncrement();
 
         try (final ServiceTracker tr = new ServiceTracker()) {
             currentlyTracking = tr;
             tr.track(new SystemPropertyManager())
                     .set("routing-strategy", ROUTER_ID_PREFIX + routerId)
                     .set("container-type", CONTAINER_ID_PREFIX + containerId)
-                    .set("test-name", testName + "-" + runComboSequence.getAndIncrement());
+                    .set("test-name", currentAppName)
+                    .set("total_shards", Integer.toString(NUM_MICROSHARDS));
 
             // instantiate session factory
             final ClusterInfoSessionFactory sessFact = tr
@@ -179,7 +218,20 @@ public class DempsyBaseTest {
             currentSessionFactory = sessFact;
 
             final List<NodeManagerWithContext> cpCtxs = IntStream.range(0, ctxs.length)
-                    .mapToObj(i -> makeNode(ctxs[i]))
+                    .mapToObj(i -> {
+                        try (SystemPropertyManager p2 = new SystemPropertyManager()) {
+                            if (perNodeProps != null && perNodeProps[i] != null) {
+                                for (final String[] kv : perNodeProps[i]) {
+                                    if (kv != null) {
+                                        if (kv.length != 2)
+                                            throw new IllegalArgumentException("Invalid KV Pair passed for per-node property");
+                                        p2.set(kv[0], kv[1]);
+                                    }
+                                }
+                            }
+                            return makeNode(ctxs[i]);
+                        }
+                    })
                     .collect(Collectors.toList());
 
             recheck(() -> cpCtxs.forEach(n -> assertTrue(uncheck(() -> poll(o -> n.manager.isReady())))), InterruptedException.class);
@@ -197,7 +249,7 @@ public class DempsyBaseTest {
         final List<String> fullCtx = new ArrayList<>(Arrays.asList(ctxArr));
         fullCtx.addAll(Arrays.asList(frameworkCtx));
         fullCtx.add(TRANSPORT_CTX_PREFIX + transportType + TRANSPORT_CTX_SUFFIX);
-        LOGGER.debug("Starting node with " + fullCtx);
+        LOGGER.debug("Starting node with {}", fullCtx);
         final ClassPathXmlApplicationContext ctx = currentlyTracking
                 .track(new ClassPathXmlApplicationContext(fullCtx.toArray(new String[fullCtx.size()])));
 
@@ -211,13 +263,13 @@ public class DempsyBaseTest {
         public int val;
     }
 
-    protected void waitForEvenShardDistribution(final ClusterInfoSession session, final String cluster, final int numNodes)
-            throws InterruptedException {
-        waitForEvenShardDistribution(session, cluster, Integer.parseInt(MicroshardingInbound.DEFAULT_TOTAL_SHARDS), numNodes);
+    protected void waitForEvenShardDistribution(final ClusterInfoSession session, final String cluster, final int numNodes,
+            final List<NodeManagerWithContext> nodes) throws InterruptedException {
+        waitForEvenShardDistribution(session, cluster, NUM_MICROSHARDS, numNodes, nodes);
     }
 
     protected void waitForEvenShardDistribution(final ClusterInfoSession session, final String cluster, final int numShardsToExpect,
-            final int numNodes) throws InterruptedException {
+            final int numNodes, final List<NodeManagerWithContext> nodes) throws InterruptedException {
         final MutableInt iters = new MutableInt();
         final String testName = System.getProperty("test-name");
         if (testName == null)
@@ -264,6 +316,38 @@ public class DempsyBaseTest {
             }
         }));
 
+        iters.val = 0;
+        // now wait until we can see it from every other node.
+        assertTrue(poll(o -> {
+            iters.val++;
+            final boolean showLog = LOGGER.isTraceEnabled() && (iters.val % 100 == 0);
+            final List<Set<NodeAddress>> reachable = nodes.stream()
+                    // pick off the Router
+                    .map(n -> n.manager.getRouter())
+                    // gather the collection of reachable ContainerAddresses from each Router to the given cluster.
+                    .map(r -> {
+                        if (showLog)
+                            LOGGER.trace("From {}", r.thisNode());
+                        return r.allReachable(cluster);
+                    })
+                    // extract a set of NodeAddresses from each of the ContainerAddress collections
+                    .map(c -> {
+                        final Set<NodeAddress> ret = c.stream().map(ca -> ca.node).collect(Collectors.toSet());
+                        if (showLog)
+                            LOGGER.trace(" ... can see {}", ret);
+                        return ret;
+                    })
+                    // Gather up the sets of NodeAddresses into a list, one for each Router.
+                    .collect(Collectors.toList());
+
+            // go through each reachable set and make sure they each contain all
+            // of the appropriate destinations.
+            for (final Set<NodeAddress> fromOne : reachable) {
+                if (fromOne.size() != numNodes)
+                    return false;
+            }
+            return true;
+        }));
     }
 
 }

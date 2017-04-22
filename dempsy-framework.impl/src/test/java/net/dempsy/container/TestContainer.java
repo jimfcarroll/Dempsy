@@ -16,6 +16,8 @@
 
 package net.dempsy.container;
 
+import static net.dempsy.AccessUtil.canReach;
+import static net.dempsy.AccessUtil.getRouter;
 import static net.dempsy.util.Functional.recheck;
 import static net.dempsy.util.Functional.uncheck;
 import static net.dempsy.utils.test.ConditionPoll.poll;
@@ -50,7 +52,6 @@ import org.junit.runners.Parameterized.Parameters;
 import org.springframework.context.support.ClassPathXmlApplicationContext;
 
 import net.dempsy.NodeManager;
-import net.dempsy.NodeManagerTestUtil;
 import net.dempsy.cluster.local.LocalClusterSessionFactory;
 import net.dempsy.config.ClusterId;
 import net.dempsy.config.Node;
@@ -173,7 +174,7 @@ public class TestContainer {
         // wait until we can actually reach the output-catch cluster from the main node
         assertTrue(poll(o -> {
             try {
-                return NodeManagerTestUtil.getRouter(manager).canReach("output-catch",
+                return canReach(getRouter(manager), "output-catch",
                         new KeyExtractor().extract(new OutputMessage("foo", 1, 1)).iterator().next());
             } catch (final Exception e) {
                 return false;

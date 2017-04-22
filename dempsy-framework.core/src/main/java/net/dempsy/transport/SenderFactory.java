@@ -18,7 +18,6 @@ package net.dempsy.transport;
 
 import net.dempsy.Infrastructure;
 import net.dempsy.Service;
-import net.dempsy.monitoring.NodeStatsCollector;
 
 /**
  * Abstraction to create multiple sender based on destination.
@@ -27,14 +26,12 @@ public interface SenderFactory extends Service {
 
     public Sender getSender(NodeAddress destination) throws MessageTransportException;
 
-    public void setStatsCollector(NodeStatsCollector statsCollector);
-
     @Override
     public default void stop() {
         close();
     }
 
     @Override
-    public default void start(final Infrastructure infra) {}
+    public void start(final Infrastructure infra);
 
 }

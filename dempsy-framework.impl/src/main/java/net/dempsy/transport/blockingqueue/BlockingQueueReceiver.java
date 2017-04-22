@@ -46,7 +46,6 @@ import net.dempsy.util.SafeString;
  */
 public class BlockingQueueReceiver implements Runnable, Receiver {
     private static Logger LOGGER = LoggerFactory.getLogger(BlockingQueueReceiver.class);
-    public static final AtomicLong receiverNumber = new AtomicLong();
 
     private final BlockingQueueAddress address;
     private final BlockingQueue<Object> queue;
@@ -128,7 +127,7 @@ public class BlockingQueueReceiver implements Runnable, Receiver {
                     "Cannot set a new Listener (" + SafeString.objectDescription(listener) + ") on a " + BlockingQueueReceiver.class.getSimpleName()
                             + " when there's one already set (" + SafeString.objectDescription(this.listener) + ")");
         this.listener = listener;
-        threadingModel.runDaemon(this, BlockingQueueReceiver.class.getSimpleName() + "-" + receiverNumber.getAndIncrement());
+        threadingModel.runDaemon(this, "BQReceiver-" + address.getGuid());
     }
 
     @Override

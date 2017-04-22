@@ -19,6 +19,7 @@ package net.dempsy.transport.blockingqueue;
 import java.util.HashMap;
 import java.util.Map;
 
+import net.dempsy.Infrastructure;
 import net.dempsy.monitoring.NodeStatsCollector;
 import net.dempsy.transport.MessageTransportException;
 import net.dempsy.transport.NodeAddress;
@@ -48,8 +49,8 @@ public class BlockingQueueSenderFactory implements SenderFactory {
     }
 
     @Override
-    public void setStatsCollector(final NodeStatsCollector statsCollector) {
-        this.statsCollector = statsCollector;
+    public void start(final Infrastructure infra) {
+        this.statsCollector = infra.getNodeStatsCollector();
     }
 
     public BlockingQueueSenderFactory setBlocking(final boolean blocking) {

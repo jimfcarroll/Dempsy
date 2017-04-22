@@ -21,6 +21,8 @@ public interface Infrastructure {
 
     Map<String, String> getConfiguration();
 
+    String getNodeId();
+
     public default String getConfigValue(final Class<?> clazz, final String key, final String defaultValue) {
         final Map<String, String> conf = getConfiguration();
         final String entireKey = clazz.getPackage().getName() + "." + key;

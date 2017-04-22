@@ -25,6 +25,7 @@ import net.dempsy.serialization.kryo.KryoSerializer;
 import net.dempsy.threading.DefaultThreadingModel;
 import net.dempsy.transport.Listener;
 import net.dempsy.transport.tcp.TcpAddress;
+import net.dempsy.util.TestInfrastructure;
 
 public class NettyTransportTest {
     private static final Logger LOGGER = LoggerFactory.getLogger(NettyTransportTest.class);
@@ -68,6 +69,12 @@ public class NettyTransportTest {
             }, tr.track(new DefaultThreadingModel(NettyTransportTest.class.getSimpleName() + ".testReceiverStart")));
 
             try (final NettySenderFactory sf = new NettySenderFactory();) {
+                sf.start(new TestInfrastructure(null, null) {
+                    @Override
+                    public String getNodeId() {
+                        return "test";
+                    }
+                });
                 final NettySender sender = sf.getSender(addr);
                 sender.send(new RoutedMessage(new int[] { 0 }, "Hello", "Hello"));
 

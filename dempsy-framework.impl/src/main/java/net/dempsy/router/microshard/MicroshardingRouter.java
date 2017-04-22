@@ -16,6 +16,7 @@ import org.slf4j.LoggerFactory;
 import net.dempsy.DempsyException;
 import net.dempsy.Infrastructure;
 import net.dempsy.cluster.ClusterInfoException;
+import net.dempsy.cluster.ClusterInfoException.NoNodeException;
 import net.dempsy.cluster.ClusterInfoSession;
 import net.dempsy.config.ClusterId;
 import net.dempsy.messages.KeyedMessageWithType;
@@ -38,6 +39,7 @@ public class MicroshardingRouter implements RoutingStrategy.Router {
     private final AutoDisposeSingleThreadScheduler dscheduler;
     private final MicroshardUtils msutils;
     private final MicroshardingRouterFactory mommy;
+    private final String thisNodeId;
 
     MicroshardingRouter(final MicroshardingRouterFactory mom, final ClusterId clusterId, final Infrastructure infra) {
         this.mommy = mom;
@@ -45,6 +47,7 @@ public class MicroshardingRouter implements RoutingStrategy.Router {
         this.dscheduler = infra.getScheduler();
         this.msutils = new MicroshardUtils(infra.getRootPaths(), clusterId, null);
         this.session = infra.getCollaborator();
+        this.thisNodeId = infra.getNodeId();
         this.isRunning.set(true);
         this.setupDestinations = makePersistentTask();
         this.setupDestinations.process();
@@ -71,10 +74,34 @@ public class MicroshardingRouter implements RoutingStrategy.Router {
 
     @Override
     public Collection<ContainerAddress> allDesintations() {
+        // we are only going to consider a destination if it's fully represented.
         final ContainerAddress[] cur = destinations.get();
         if (cur == null)
             return new ArrayList<>();
-        return Arrays.stream(cur).filter(ca -> ca != null).collect(Collectors.toList());
+        final Set<ContainerAddress> ret = Arrays.stream(cur).filter(ca -> ca != null).collect(Collectors.toSet());
+
+        final int nodeCount = ret.size();
+        final int min = Math.floorDiv(cur.length, nodeCount);
+        final int max = (int) Math.ceil((double) cur.length / (double) nodeCount);
+
+        final ArrayList<ContainerAddress> tmp = new ArrayList<>(ret);
+        for (final ContainerAddress addr : tmp) {
+            // how many?
+            int count = 0;
+            for (final ContainerAddress known : cur) {
+                if (addr.equals(known))
+                    count++;
+            }
+            if (count < min || count > max)
+                ret.remove(addr);
+        }
+
+        return ret;
+    }
+
+    @Override
+    public String toString() {
+        return "{" + MicroshardingRouter.class.getSimpleName() + " at " + thisNodeId + " to " + clusterId + "}";
     }
 
     /**
@@ -89,9 +116,9 @@ public class MicroshardingRouter implements RoutingStrategy.Router {
                 return false;
         final boolean ret = ds.length != 0; // this method is only called in tests and this needs to be true there.
 
-        if (ret) {
-            LOGGER.debug("Is Ready " + shorthand(ds));
-        }
+        if (ret && LOGGER.isDebugEnabled())
+            LOGGER.debug("at {} to {} is Ready " + shorthand(ds), thisNodeId, clusterId);
+
         return ret;
     }
 
@@ -107,7 +134,7 @@ public class MicroshardingRouter implements RoutingStrategy.Router {
 
             @Override
             public String toString() {
-                final String prefix = "setup or reset known destinations for Router to " + clusterId + " from " + MicroshardingRouter.this;
+                final String prefix = "setup or reset known destinations for " + MicroshardingRouter.this;
                 if (LOGGER.isTraceEnabled()) {
                     final ContainerAddress[] addr = destinations.get();
                     return prefix + " known destinations=" + shorthand(addr);
@@ -119,7 +146,7 @@ public class MicroshardingRouter implements RoutingStrategy.Router {
             public synchronized boolean execute() {
                 try {
                     if (LOGGER.isTraceEnabled())
-                        LOGGER.trace("Resetting Outbound Strategy for cluster " + clusterId + " from " + clusterId);
+                        LOGGER.trace("Resetting Outbound Strategy for {}", MicroshardingRouter.this);
 
                     tx.watch();
 
@@ -136,15 +163,14 @@ public class MicroshardingRouter implements RoutingStrategy.Router {
                     if (newtotalAddressCounts < 0 || emptyShards.size() > 0)
                         return false;
 
-                    if (newtotalAddressCounts == 0)
-                        LOGGER.info("The cluster " + SafeString.valueOf(clusterId) + " doesn't seem to have registered any details.");
+                    if (newtotalAddressCounts == 0 && LOGGER.isInfoEnabled())
+                        LOGGER.info("The cluster {} as seen from {} doesn't seem to have keyspace ownership yet.",
+                                clusterId, thisNodeId);
 
                     if (newtotalAddressCounts > 0) {
                         final ContainerAddress[] newDestinations = new ContainerAddress[newtotalAddressCounts];
-                        for (final Map.Entry<Integer, ShardInfo> entry : shardNumbersToShards.entrySet()) {
-                            final ShardInfo shardInfo = entry.getValue();
-                            newDestinations[entry.getKey()] = shardInfo.destination;
-                        }
+                        for (final Map.Entry<Integer, ShardInfo> entry : shardNumbersToShards.entrySet())
+                            newDestinations[entry.getKey().intValue()] = entry.getValue().destination;
 
                         destinations.set(newDestinations);
                     } else
@@ -155,9 +181,13 @@ public class MicroshardingRouter implements RoutingStrategy.Router {
                     if (ret)
                         tx.close();
                     return ret;
+                } catch (final NoNodeException e) {
+                    destinations.set(null);
+                    if (LOGGER.isTraceEnabled())
+                        LOGGER.trace("at {} Failed to set up the Outbound for {}: " + e.getLocalizedMessage(), thisNodeId, clusterId);
                 } catch (final ClusterInfoException e) {
                     destinations.set(null);
-                    LOGGER.debug("Failed to set up the Outbound for {}: {}", clusterId, e.getLocalizedMessage());
+                    LOGGER.info("at {} Failed to set up the Outbound for {}: " + e.getLocalizedMessage(), thisNodeId, clusterId);
                 } catch (final RuntimeException rte) {
                     destinations.set(null); // failure means retry but we're not ready.
                     throw rte;

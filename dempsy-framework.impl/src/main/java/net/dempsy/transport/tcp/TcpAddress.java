@@ -13,6 +13,14 @@ public class TcpAddress implements NodeAddress {
     public final int port;
     public final String serializerId;
 
+    @SuppressWarnings("unused")
+    private TcpAddress() {
+        guid = null;
+        inetAddress = null;
+        port = -1;
+        serializerId = null;
+    }
+
     public TcpAddress(final InetAddress inetAddress, final int port, final String serializerId) {
         this.inetAddress = inetAddress;
         this.port = port;

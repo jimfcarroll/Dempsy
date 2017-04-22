@@ -8,7 +8,9 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -46,7 +48,7 @@ public class NodeManager implements Infrastructure, AutoCloseable {
 
     private Node node = null;
     private ClusterInfoSession session;
-    private final AutoDisposeSingleThreadScheduler persistenceScheduler = new AutoDisposeSingleThreadScheduler("Dempsy-pestering");
+    private final AutoDisposeSingleThreadScheduler persistenceScheduler = new AutoDisposeSingleThreadScheduler("dempsy-pestering");
 
     private final AtomicBoolean isRunning = new AtomicBoolean(false);
 
@@ -66,6 +68,7 @@ public class NodeManager implements Infrastructure, AutoCloseable {
     private RoutingStrategyManager rsManager = null;
     private TransportManager tManager = null;
     private NodeAddress nodeAddress = null;
+    private String nodeId = null;
 
     AtomicBoolean ptaskReady = new AtomicBoolean(false);
 
@@ -100,8 +103,11 @@ public class NodeManager implements Infrastructure, AutoCloseable {
 
         // =====================================
         // set the dispatcher on adaptors and create containers for mp clusters
+        final AtomicReference<String> firstAdaptorClusterName = new AtomicReference<String>(null);
         node.getClusters().forEach(c -> {
             if (c.isAdaptor()) {
+                if (firstAdaptorClusterName.get() == null)
+                    firstAdaptorClusterName.set(c.getClusterId().clusterName);
                 final Adaptor adaptor = c.getAdaptor();
                 adaptors.put(c.getClusterId(), adaptor);
             } else {
@@ -120,66 +126,84 @@ public class NodeManager implements Infrastructure, AutoCloseable {
         // register node with session
         // =====================================
         // first gather node information
-        receiver = (Receiver) node.getReceiver();
-        nodeAddress = receiver.getAddress();
 
-        threading = tr.track(new DefaultThreadingModel("NodeThreadPool-" + nodeAddress.getGuid() + "-")).setCoresFactor(1.0).setAdditionalThreads(1)
+        // it we're all adaptor then don't bother to get the receiver.
+        if (containers.size() == 0) {
+            // here there's no point in a reciever since there's nothing to recieve.
+            if (firstAdaptorClusterName.get() == null)
+                throw new IllegalStateException("There seems to be no clusters or adaptors defined for this node \"" + node.toString() + "\"");
+        } else {
+            receiver = (Receiver) node.getReceiver();
+            if (receiver != null) // otherwise we're all adaptor
+                nodeAddress = receiver.getAddress();
+            else if (firstAdaptorClusterName.get() == null)
+                throw new IllegalStateException("There seems to be no clusters or adaptors defined for this node \"" + node.toString() + "\"");
+        }
+
+        nodeId = Optional.ofNullable(nodeAddress).map(n -> n.getGuid()).orElse(firstAdaptorClusterName.get());
+
+        threading = tr.track(new DefaultThreadingModel("NodeThreadPool-" + nodeId + "-"))
+                .setCoresFactor(1.0).setAdditionalThreads(1).setHardShutdown(true)
                 .setMaxNumberOfQueuedLimitedTasks(10000).start();
 
-        final NodeReceiver nodeReciever = tr
+        final NodeReceiver nodeReciever = receiver == null ? null : tr
                 .track(new NodeReceiver(containers.stream().map(pc -> pc.container).collect(Collectors.toList()), threading, nodeStatsCollector));
 
-        final String nodeId = nodeAddress.getGuid();
         final Map<ClusterId, ClusterInformation> messageTypesByClusterId = new HashMap<>();
         containers.stream().map(pc -> pc.clusterDefinition).forEach(c -> {
             messageTypesByClusterId.put(c.getClusterId(),
                     new ClusterInformation(c.getRoutingStrategyId(), c.getClusterId(), c.getMessageProcessor().messagesTypesHandled()));
         });
-        final NodeInformation nodeInfo = new NodeInformation(receiver.transportTypeId(), nodeAddress, messageTypesByClusterId);
+        final NodeInformation nodeInfo = nodeAddress != null ? new NodeInformation(receiver.transportTypeId(), nodeAddress, messageTypesByClusterId)
+                : null;
 
         // Then actually register the Node
-        keepNodeRegstered = new PersistentTask(LOGGER, isRunning, persistenceScheduler, RETRY_PERIOND_MILLIS) {
-            @Override
-            public boolean execute() {
-                try {
-                    final String application = node.application;
-                    session.recursiveMkdir(clusters(application), DirMode.PERSISTENT);
-                    session.recursiveMkdir(nodes(application), DirMode.PERSISTENT);
+        if (nodeInfo != null) {
+            keepNodeRegstered = new PersistentTask(LOGGER, isRunning, persistenceScheduler, RETRY_PERIOND_MILLIS) {
+                @Override
+                public boolean execute() {
+                    try {
+                        final String application = node.application;
+                        session.recursiveMkdir(clusters(application), DirMode.PERSISTENT);
+                        session.recursiveMkdir(nodes(application), DirMode.PERSISTENT);
 
-                    final String nodePath = nodes(application) + "/" + nodeId;
+                        final String nodePath = nodes(application) + "/" + nodeId;
 
-                    session.mkdir(nodePath, nodeInfo, DirMode.EPHEMERAL);
-                    final NodeInformation reread = (NodeInformation) session.getData(nodePath, this);
-                    final boolean ret = nodeInfo.equals(reread);
-                    if (ret == true)
-                        ptaskReady.set(true);
-                    return ret;
-                } catch (final ClusterInfoException e) {
-                    final String logmessage = "Failed to register the node. Retrying in " + RETRY_PERIOND_MILLIS + " milliseconds.";
-                    if (LOGGER.isDebugEnabled())
-                        LOGGER.info(logmessage, e);
-                    else
-                        LOGGER.info(logmessage);
+                        session.mkdir(nodePath, nodeInfo, DirMode.EPHEMERAL);
+                        final NodeInformation reread = (NodeInformation) session.getData(nodePath, this);
+                        final boolean ret = nodeInfo.equals(reread);
+                        if (ret == true)
+                            ptaskReady.set(true);
+                        return ret;
+                    } catch (final ClusterInfoException e) {
+                        final String logmessage = "Failed to register the node. Retrying in " + RETRY_PERIOND_MILLIS + " milliseconds.";
+                        if (LOGGER.isDebugEnabled())
+                            LOGGER.info(logmessage, e);
+                        else
+                            LOGGER.info(logmessage);
+                    }
+                    return false;
                 }
-                return false;
-            }
 
-            @Override
-            public String toString() {
-                return "register node information";
-            }
-        };
+                @Override
+                public String toString() {
+                    return "register node information";
+                }
+            };
+        }
 
+        // =====================================
         // The layering works this way.
         //
         // Receiver -> NodeReceiver -> adaptor -> container -> Router -> RoutingStrategyOB -> Transport
         //
         // starting needs to happen in reverse.
+        // =====================================
         isRunning.set(true);
-        keepNodeRegstered.process();
 
         this.tManager = tr.start(new TransportManager(), this);
         this.rsManager = tr.start(new RoutingStrategyManager(), this);
+
         this.router = tr.start(new Router(rsManager, nodeAddress, nodeReciever, tManager, nodeStatsCollector), this);
 
         // set up containers
@@ -201,10 +225,17 @@ public class NodeManager implements Infrastructure, AutoCloseable {
             tr.start(c.inboundStrategy, this);
         });
 
-        tr.track(receiver).start(nodeReciever, threading);
+        if (receiver != null)
+            tr.track(receiver).start(nodeReciever, threading);
 
         tr.track(session); // close this session when we're done.
         // =====================================
+
+        // make it known we're here and ready
+        if (keepNodeRegstered != null)
+            keepNodeRegstered.process();
+        else
+            ptaskReady.set(true);
 
         return this;
     }
@@ -276,6 +307,11 @@ public class NodeManager implements Infrastructure, AutoCloseable {
         return node.getConfiguration();
     }
 
+    @Override
+    public String getNodeId() {
+        return nodeId;
+    }
+
     // Testing accessors
 
     // ==============================================================================
@@ -293,6 +329,7 @@ public class NodeManager implements Infrastructure, AutoCloseable {
     Container getContainer(final String clusterName) {
         return containers.stream().filter(pc -> clusterName.equals(pc.clusterDefinition.getClusterId().clusterName)).findFirst().get().container;
     }
+
     // ==============================================================================
 
     private static class PerContainer {
