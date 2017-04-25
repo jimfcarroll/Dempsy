@@ -17,6 +17,7 @@ import org.slf4j.LoggerFactory;
 
 import net.dempsy.cluster.ClusterInfoException;
 import net.dempsy.cluster.ClusterInfoSession;
+import net.dempsy.cluster.DirMode;
 import net.dempsy.messages.Dispatcher;
 import net.dempsy.messages.KeyedMessageWithType;
 import net.dempsy.monitoring.NodeStatsCollector;
@@ -319,6 +320,7 @@ public class Router extends Dispatcher implements Service {
             public boolean execute() {
                 try {
                     // collect up all NodeInfo's known about.
+                    session.recursiveMkdir(nodesDir, null, DirMode.PERSISTENT, DirMode.PERSISTENT);
                     final Collection<String> nodeDirs = session.getSubdirs(nodesDir, this);
 
                     final Set<NodeInformation> alreadySeen = new HashSet<>();

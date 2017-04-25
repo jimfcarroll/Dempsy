@@ -211,7 +211,7 @@ public class NodeManager implements Infrastructure, AutoCloseable {
         this.tManager = tr.start(new TransportManager(), this);
         this.rsManager = tr.start(new RoutingStrategyManager(), this);
 
-        this.router = tr.start(new Router(rsManager, nodeAddress, nodeReciever, tManager, nodeStatsCollector), this);
+        this.router = new Router(rsManager, nodeAddress, nodeReciever, tManager, nodeStatsCollector);
 
         // set up containers
         containers.forEach(pc -> pc.container.setDispatcher(router));
@@ -222,9 +222,6 @@ public class NodeManager implements Infrastructure, AutoCloseable {
         // set up adaptors
         adaptors.values().forEach(a -> a.setDispatcher(router));
 
-        // start adaptors
-        adaptors.entrySet().forEach(e -> threading.runDaemon(() -> tr.track(e.getValue()).start(), "Adaptor-" + e.getKey().clusterName));
-
         // IB routing strategy
         final int numContainers = containers.size();
         for (int i = 0; i < numContainers; i++) {
@@ -232,6 +229,12 @@ public class NodeManager implements Infrastructure, AutoCloseable {
             c.inboundStrategy.setContainerDetails(c.clusterDefinition.getClusterId(), new ContainerAddress(nodeAddress, i));
             tr.start(c.inboundStrategy, this);
         }
+        
+        // start router
+        tr.start(this.router, this);
+
+        // start adaptors
+        adaptors.entrySet().forEach(e -> threading.runDaemon(() -> tr.track(e.getValue()).start(), "Adaptor-" + e.getKey().clusterName));
 
         if (receiver != null)
             tr.track(receiver).start(nodeReciever, threading);
