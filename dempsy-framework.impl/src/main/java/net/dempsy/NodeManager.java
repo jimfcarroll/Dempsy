@@ -72,6 +72,8 @@ public class NodeManager implements Infrastructure, AutoCloseable {
 
     AtomicBoolean ptaskReady = new AtomicBoolean(false);
     
+    public NodeManager() {}
+    
     public NodeManager(final Node node, final ClusterInfoSessionFactory sessionFactory) throws ClusterInfoException {
         node(node);
         collaborator(sessionFactory.createSession());
