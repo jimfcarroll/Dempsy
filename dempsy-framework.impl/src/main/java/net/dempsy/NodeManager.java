@@ -18,6 +18,7 @@ import org.slf4j.LoggerFactory;
 
 import net.dempsy.cluster.ClusterInfoException;
 import net.dempsy.cluster.ClusterInfoSession;
+import net.dempsy.cluster.ClusterInfoSessionFactory;
 import net.dempsy.cluster.DirMode;
 import net.dempsy.config.Cluster;
 import net.dempsy.config.ClusterId;
@@ -70,6 +71,11 @@ public class NodeManager implements Infrastructure, AutoCloseable {
     private String nodeId = null;
 
     AtomicBoolean ptaskReady = new AtomicBoolean(false);
+    
+    public NodeManager(final Node node, final ClusterInfoSessionFactory sessionFactory) throws ClusterInfoException {
+        node(node);
+        collaborator(sessionFactory.createSession());
+    }
 
     public NodeManager node(final Node node) {
         this.node = node;
@@ -342,6 +348,22 @@ public class NodeManager implements Infrastructure, AutoCloseable {
             this.inboundStrategy = inboundStrategy;
             this.clusterDefinition = clusterDefinition;
         }
+    }
+    
+    public Node getNode() {
+        return node;
+    }
+
+    public void setNode(final Node node) {
+        node(node);
+    }
+
+    public ClusterInfoSession getSession() {
+        return session;
+    }
+
+    public void setSession(final ClusterInfoSession session) {
+        collaborator(session);
     }
 
 }

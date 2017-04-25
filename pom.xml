@@ -41,10 +41,10 @@
   </properties>
 
   <modules>
-    <module>lib-dempsyapi</module>
+	  <!--<module>lib-dempsyapi</module>
     <module>lib-dempsycore</module>
     <module>lib-dempsyimpl</module>
-    <module>lib-dempsyspring</module> 
+    <module>lib-dempsyspring</module>-->
     <!-- The sign on the door says: Out Of Order -->
     <!--      <module>lib-dempsyguice</module> -->
 
