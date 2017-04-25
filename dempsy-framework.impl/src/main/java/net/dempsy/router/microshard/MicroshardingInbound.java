@@ -16,6 +16,7 @@
 
 package net.dempsy.router.microshard;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -33,7 +34,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import net.dempsy.Infrastructure;
-import net.dempsy.KeyspaceResponsibilityChangeListener;
+import net.dempsy.KeyspaceChangeListener;
 import net.dempsy.cluster.ClusterInfoException;
 import net.dempsy.cluster.ClusterInfoSession;
 import net.dempsy.cluster.ClusterInfoWatcher;
@@ -58,10 +59,11 @@ public class MicroshardingInbound implements RoutingStrategy.Inbound {
 
     public static final String CONFIG_KEY_TOTAL_SHARDS = "total_shards";
     public static final String CONFIG_KEY_MIN_NODES = "min_node_count";
-    public static final String DEFAULT_TOTAL_SHARDS = "300";
+    public static final String DEFAULT_TOTAL_SHARDS = "256";
     public static final String DEFAULT_MIN_NODES = "1";
 
     protected int totalNumShards = Integer.parseInt(DEFAULT_TOTAL_SHARDS);
+    protected int mask;
     protected int minNumberOfNodes = Integer.parseInt(DEFAULT_MIN_NODES);
 
     private AutoDisposeSingleThreadScheduler dscheduler;
@@ -73,12 +75,9 @@ public class MicroshardingInbound implements RoutingStrategy.Inbound {
     private ContainerAddress thisNodeAddress;
     private ClusterId clusterId;
     // TODO: handle this
-    private final KeyspaceResponsibilityChangeListener listener = new KeyspaceResponsibilityChangeListener() {
+    private final KeyspaceChangeListener listener = new KeyspaceChangeListener() {
         @Override
-        public void setInboundStrategy(final Inbound inbound) {}
-
-        @Override
-        public void keyspaceResponsibilityChanged(final boolean less, final boolean more) {}
+        public void keyspaceChanged(final boolean less, final boolean more, final Inbound inbound) {}
     };
     private MicroshardUtils msutils;
     private ClusterInfo clusterInfo;
@@ -95,6 +94,12 @@ public class MicroshardingInbound implements RoutingStrategy.Inbound {
 
         totalNumShards = Integer
                 .parseInt(infra.getConfigValue(MicroshardingInbound.class, CONFIG_KEY_TOTAL_SHARDS, DEFAULT_TOTAL_SHARDS));
+
+        if (Integer.bitCount(totalNumShards) != 1)
+            throw new IllegalArgumentException("The configuration property \"" + CONFIG_KEY_TOTAL_SHARDS
+                    + "\" must be set to a power of 2. It's currently set to " + totalNumShards);
+
+        mask = totalNumShards - 1;
         minNumberOfNodes = Integer.parseInt(infra.getConfigValue(MicroshardingInbound.class, CONFIG_KEY_MIN_NODES, DEFAULT_MIN_NODES));
 
         this.shardChangeWatcher = getShardChangeWatcher();
@@ -139,14 +144,36 @@ public class MicroshardingInbound implements RoutingStrategy.Inbound {
                 return "determin and participate in shard distribution for " + clusterId + " from " + thisNodeAddress.node;
             }
 
-            private final void checkNodeDirectory() throws ClusterInfoException {
+            private final int checkNodeDirectory() throws ClusterInfoException {
                 try {
 
                     // get all of the nodes in the nodeDir and set one for this node if it's not already set.
-                    Collection<String> nodeDirs = msutils.persistentGetMainDirSubdirs(session, msutils.clusterNodesDir, this);
-                    if (nodeDirectory == null || !session.exists(nodeDirectory, this)) {
-                        nodeDirectory = session.mkdir(msutils.clusterNodesDir + "/node_", thisNodeAddress, DirMode.EPHEMERAL_SEQUENTIAL);
+                    final Collection<String> nodeDirs;
+                    if (nodeDirectory == null) {
+                        nodeDirectory = session.recursiveMkdir(msutils.clusterNodesDir + "/node_", thisNodeAddress, DirMode.PERSISTENT,
+                                DirMode.EPHEMERAL_SEQUENTIAL);
                         nodeDirs = session.getSubdirs(msutils.clusterNodesDir, this);
+                    } else
+                        nodeDirs = msutils.persistentGetMainDirSubdirs(session, msutils.clusterNodesDir, this);
+
+                    // what node am I?
+                    int nodeRank = -1;
+                    int index = 0;
+                    final String nodeSubdir = new File(nodeDirectory).getName();
+                    for (final String cur : nodeDirs) {
+                        if (nodeSubdir.equals(cur)) {
+                            nodeRank = index;
+                            break;
+                        }
+                        index++;
+                    }
+
+                    // If I couldn't find me, there's a problem.
+                    if (nodeRank == -1) {
+                        // drop the node directory since it clearly doesn't exist anymore
+                        nodeDirectory = null;
+                        throw new ClusterInfoException(
+                                "Node " + thisNodeAddress + " was registered at " + nodeSubdir + " but it wasn't found as a subdirectory.");
                     }
 
                     // verify the container address is correct.
@@ -168,6 +195,8 @@ public class MicroshardingInbound implements RoutingStrategy.Inbound {
                         if (thisNodeAddress.equals(curDest) && !fullPathToSubdir.equals(nodeDirectory)) // this is bad .. clean up
                             session.rmdir(fullPathToSubdir);
                     }
+
+                    return nodeRank;
                 } catch (final ClusterInfoException cie) {
                     cleanupAfterExceptionDuringNodeDirCheck();
                     throw cie;
@@ -205,11 +234,10 @@ public class MicroshardingInbound implements RoutingStrategy.Inbound {
                     tx.watch(); // need to watch the transaciton dir.
 
                     // check node directory
-                    checkNodeDirectory();
+                    final int nodeRank = checkNodeDirectory();
 
                     final int currentWorkingNodeCount = findWorkingNodeCount(session, msutils, minNumberOfNodes, null);
-                    final int acquireUpToThisMany = Math.floorDiv(totalNumShards, currentWorkingNodeCount);
-                    final int releaseDownToThisMany = (int) Math.ceil((double) totalNumShards / (double) currentWorkingNodeCount);
+                    final int numberIShouldHave = howManyShouldIHave(totalNumShards, currentWorkingNodeCount, nodeRank);
 
                     // we are rebalancing the shards so we will figure out what we are removing
                     // and adding.
@@ -261,11 +289,11 @@ public class MicroshardingInbound implements RoutingStrategy.Inbound {
                     for (final Integer shardToReaquire : shardsToReaquire) {
                         // if we already have too many shards then there's no point in trying
                         // to reacquire the the shard.
-                        if (numberOfShardsWeActuallyHave >= acquireUpToThisMany) {
+                        if (numberOfShardsWeActuallyHave >= numberIShouldHave) {
                             if (traceOn)
                                 LOGGER.trace(MicroshardingInbound.this.toString() + " removing " + shardToReaquire +
                                         " from one's I care about because I already have " + numberOfShardsWeActuallyHave +
-                                        " but only need " + acquireUpToThisMany);
+                                        " but only need " + numberIShouldHave);
 
                             destinationsToRemove.add(shardToReaquire); // we're going to skip it ... and drop it.
                         }
@@ -292,13 +320,13 @@ public class MicroshardingInbound implements RoutingStrategy.Inbound {
                     // until we are either at the level were we should be, or we have no more to give up
                     // from the list of those we were planning on adding.
                     Iterator<Integer> curPos = destinationsToAdd.iterator();
-                    while (numberOfShardsWeActuallyHave > releaseDownToThisMany &&
+                    while (numberOfShardsWeActuallyHave > numberIShouldHave &&
                             destinationsToAdd.size() > 0 && curPos.hasNext()) {
                         final Integer cur = curPos.next();
                         if (doIOwnThisShard(cur, shardNumbersToShards)) {
                             if (traceOn)
                                 LOGGER.trace(MicroshardingInbound.this.toString() + " removing shard " + cur + " because I already have " +
-                                        numberOfShardsWeActuallyHave + " but can give up to " + releaseDownToThisMany
+                                        numberOfShardsWeActuallyHave + " but can give up some until I have " + numberIShouldHave
                                         + " and was planning on adding it.");
 
                             curPos.remove();
@@ -314,13 +342,13 @@ public class MicroshardingInbound implements RoutingStrategy.Inbound {
                     // Here, if we still have too many shards, we will begin deleting destinationsToRemove
                     // that we may own actually own.
                     curPos = destinationsToRemove.iterator();
-                    while (numberOfShardsWeActuallyHave > releaseDownToThisMany &&
+                    while (numberOfShardsWeActuallyHave > numberIShouldHave &&
                             destinationsToRemove.size() > 0 && curPos.hasNext()) {
                         final Integer cur = curPos.next();
                         if (doIOwnThisShard(cur, shardNumbersToShards)) {
                             if (traceOn)
                                 LOGGER.trace(MicroshardingInbound.this.toString() + " removing shard " + cur + " because I already have " +
-                                        numberOfShardsWeActuallyHave + " but can give up to " + releaseDownToThisMany +
+                                        numberOfShardsWeActuallyHave + " but can give up some until I have " + numberIShouldHave +
                                         " and was planning on removing it anyway.");
 
                             session.rmdir(msutils.shardsDir + "/" + cur);
@@ -334,14 +362,14 @@ public class MicroshardingInbound implements RoutingStrategy.Inbound {
                     // ==============================================================================
                     // above we bled off the destinationsToAdd. Now we remove actually known destinationsAcquired
                     final Iterator<Integer> destinationsAcquiredIter = destinationsAcquired.iterator();
-                    while (numberOfShardsWeActuallyHave > releaseDownToThisMany && destinationsAcquiredIter.hasNext()) {
+                    while (numberOfShardsWeActuallyHave > numberIShouldHave && destinationsAcquiredIter.hasNext()) {
                         final Integer cur = destinationsAcquiredIter.next();
                         // if we're already set to remove it because it didn't appear in the initial fillMapFromActiveShards
                         // then there's no need to remove it from the session as it's already gone.
                         if (doIOwnThisShard(cur, shardNumbersToShards)) {
                             if (traceOn)
                                 LOGGER.trace(MicroshardingInbound.this.toString() + " removing shard " + cur + " because I already have " +
-                                        numberOfShardsWeActuallyHave + " but can give up to " + releaseDownToThisMany + ".");
+                                        numberOfShardsWeActuallyHave + " but can give up some until I have " + numberIShouldHave + ".");
 
                             session.rmdir(msutils.shardsDir + "/" + cur);
                             tx.open();
@@ -355,15 +383,15 @@ public class MicroshardingInbound implements RoutingStrategy.Inbound {
                     // ==============================================================================
                     // Now see if we need to grab more shards. Maybe we just came off backup or, in
                     // the case of elasticity, maybe another node went down.
-                    if (traceOn)
+                    if (traceOn && numberOfShardsWeActuallyHave < numberIShouldHave)
                         LOGGER.trace(MicroshardingInbound.this.toString() + " considering grabbing more shards given that I have "
                                 + numberOfShardsWeActuallyHave
-                                + " but could have a max of " + releaseDownToThisMany);
+                                + " but could have a max of " + numberIShouldHave);
 
                     List<Integer> shardsToTry = null;
                     Collection<String> subdirs;
                     while (((subdirs = session.getSubdirs(msutils.shardsDir, null)).size() < totalNumShards) &&
-                            (numberOfShardsWeActuallyHave < releaseDownToThisMany)) {
+                            (numberOfShardsWeActuallyHave < numberIShouldHave)) {
                         if (traceOn)
                             LOGGER.trace(MicroshardingInbound.this.toString() + " will try to grab more shards.");
 
@@ -398,7 +426,7 @@ public class MicroshardingInbound implements RoutingStrategy.Inbound {
                             LOGGER.trace(
                                     previous + " keyspace notification (" + (destinationsToRemove.size() > 0) + "," + (destinationsToAdd.size() > 0)
                                             + ")");
-                        listener.keyspaceResponsibilityChanged(destinationsToRemove.size() > 0, destinationsToAdd.size() > 0);
+                        listener.keyspaceChanged(destinationsToRemove.size() > 0, destinationsToAdd.size() > 0, MicroshardingInbound.this);
                     }
 
                     if (LOGGER.isTraceEnabled())
@@ -433,8 +461,9 @@ public class MicroshardingInbound implements RoutingStrategy.Inbound {
             // make sure we have all of the nodes we should have
             final int numNodes = session.getSubdirs(msutils.clusterNodesDir, null).size();
 
-            return (destinationsAcquired.size() >= (int) Math.floor((double) totalNumShards / (double) numNodes)) &&
+            final boolean ret = (destinationsAcquired.size() >= (int) Math.floor((double) totalNumShards / (double) numNodes)) &&
                     (destinationsAcquired.size() <= (int) Math.ceil((double) totalNumShards / (double) numNodes));
+            return ret;
         } catch (final ClusterInfoException e) {
             return false;
         } catch (final RuntimeException re) {
@@ -448,9 +477,16 @@ public class MicroshardingInbound implements RoutingStrategy.Inbound {
         isRunning.set(false);
     }
 
+    // we multiply by an arbitrary large (not 31) prime in order to
+    // avoid overlapping collisions with the normal HashMap operation
+    // used in the container implementations.
+    final static int prime = 514229;
+
     @Override
     public boolean doesMessageKeyBelongToNode(final Object messageKey) {
-        return destinationsAcquired.contains(Math.abs(messageKey.hashCode() % totalNumShards));
+        // normally this would need to be passed to Math.abs however, using a 'mask' rather
+        // than a mod means this number can never be negative.
+        return destinationsAcquired.contains((prime * messageKey.hashCode()) & mask);
     }
 
     public int getNumShardsCovered() {
@@ -498,5 +534,11 @@ public class MicroshardingInbound implements RoutingStrategy.Inbound {
                 ret.add(i);
         }
         return ret;
+    }
+
+    private final static int howManyShouldIHave(final int totalShardCount, final int numNodes, final int myRank) {
+        final int base = Math.floorDiv(totalShardCount, numNodes);
+        final int mod = Math.floorMod(totalShardCount, numNodes);
+        return myRank < mod ? (base + 1) : base;
     }
 }

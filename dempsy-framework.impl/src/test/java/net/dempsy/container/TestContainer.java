@@ -349,7 +349,7 @@ public class TestContainer {
 
     @Test
     public void testFeedbackLoop() throws Exception {
-        cache = new HashMap<>();
+        cache = new ConcurrentHashMap<>();
         final TestAdaptor adaptor = context.getBean(TestAdaptor.class);
         assertNotNull(adaptor.dispatcher);
 
@@ -377,7 +377,7 @@ public class TestContainer {
 
     @Test
     public void testMessageDispatch() throws Exception {
-        cache = new HashMap<>();
+        cache = new ConcurrentHashMap<>();
         final TestAdaptor adaptor = context.getBean(TestAdaptor.class);
         assertNotNull(adaptor.dispatcher);
 
@@ -404,7 +404,7 @@ public class TestContainer {
     @Test
     public void testInvokeOutput() throws Exception {
         outputMessages = Collections.newSetFromMap(new ConcurrentHashMap<>());
-        cache = new HashMap<>();
+        cache = new ConcurrentHashMap<>();
 
         final TestAdaptor adaptor = context.getBean(TestAdaptor.class);
         assertNotNull(adaptor.dispatcher);

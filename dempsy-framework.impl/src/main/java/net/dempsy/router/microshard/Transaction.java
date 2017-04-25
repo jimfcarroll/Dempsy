@@ -29,7 +29,7 @@ public class Transaction implements ClusterInfoWatcher {
     }
 
     public void mkRootDirs() throws ClusterInfoException {
-        session.recursiveMkdir(transactionDirPath, DirMode.PERSISTENT);
+        session.recursiveMkdir(transactionDirPath, null, DirMode.PERSISTENT, DirMode.PERSISTENT);
     }
 
     public void watch() throws ClusterInfoException {

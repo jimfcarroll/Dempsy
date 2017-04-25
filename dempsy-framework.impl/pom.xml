@@ -65,6 +65,11 @@
      </dependency>
      <dependency>
         <groupId>net.dempsy</groupId>
+        <artifactId>dempsy-serialization.java</artifactId>
+        <scope>test</scope>
+     </dependency>
+     <dependency>
+        <groupId>net.dempsy</groupId>
         <artifactId>dempsy-serialization.kryo</artifactId>
         <scope>test</scope>
      </dependency>

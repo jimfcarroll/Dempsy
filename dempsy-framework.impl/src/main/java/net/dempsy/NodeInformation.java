@@ -61,5 +61,4 @@ public class NodeInformation implements Serializable {
             return false;
         return true;
     }
-
 }

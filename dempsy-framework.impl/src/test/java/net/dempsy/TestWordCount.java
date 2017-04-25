@@ -56,8 +56,8 @@ public class TestWordCount extends DempsyBaseTest {
         return writer.toString();
     }
 
-    public TestWordCount(final String routerId, final String containerId, final String sessCtx, final String tpid) {
-        super(LOGGER, routerId, containerId, sessCtx, tpid);
+    public TestWordCount(final String routerId, final String containerId, final String sessCtx, final String tpid, final String serType) {
+        super(LOGGER, routerId, containerId, sessCtx, tpid, serType);
     }
 
     @Before
@@ -355,7 +355,7 @@ public class TestWordCount extends DempsyBaseTest {
             };
 
             WordProducer.latch = new CountDownLatch(1); // need to make it wait.
-            runCombos("testWordCountNoRankMultinode", (r, c, s, t) -> !r.equals("simple"), ctxs, n -> {
+            runCombos("testWordCountNoRankMultinode", (r, c, s, t, ser) -> !r.equals("simple"), ctxs, n -> {
                 final List<NodeManagerWithContext> nodes = n.nodes;
                 final NodeManager[] manager = Arrays.asList(nodes.get(0).manager, nodes.get(1).manager).toArray(new NodeManager[2]);
                 final ClassPathXmlApplicationContext[] ctx = Arrays.asList(nodes.get(0).ctx, nodes.get(1).ctx)
@@ -391,7 +391,7 @@ public class TestWordCount extends DempsyBaseTest {
             };
 
             WordProducer.latch = new CountDownLatch(1); // need to make it wait.
-            runCombos("testWordCountNoRankMultinode", (r, c, s, t) -> !r.equals("simple"), ctxs, n -> {
+            runCombos("testWordCountNoRankMultinode", (r, c, s, t, ser) -> !r.equals("simple"), ctxs, n -> {
                 final List<NodeManagerWithContext> nodes = n.nodes;
                 final NodeManager[] manager = Arrays.asList(nodes.get(1).manager, nodes.get(2).manager).toArray(new NodeManager[2]);
                 final ClassPathXmlApplicationContext[] ctx = Arrays.asList(nodes.get(0).ctx, nodes.get(1).ctx)

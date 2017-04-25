@@ -31,7 +31,25 @@ public class MicroshardingRouter implements RoutingStrategy.Router {
     private static Logger LOGGER = LoggerFactory.getLogger(MicroshardingRouter.class);
     private static final long RETRY_TIMEOUT = 500L;
 
-    private final AtomicReference<ContainerAddress[]> destinations = new AtomicReference<ContainerAddress[]>(null);
+    private static final class DestinationDetails {
+        final ContainerAddress[] desinations;
+        final int mask;
+
+        DestinationDetails(final ContainerAddress[] desinations) {
+            this.desinations = desinations;
+            final int totalAddressCount = desinations.length;
+            if (totalAddressCount == 0)
+                mask = 0;
+            else {
+                if (Integer.bitCount(totalAddressCount) != 1)
+                    throw new IllegalStateException("FATAL: The number of shards isn't a power of 2.");
+                mask = totalAddressCount - 1;
+            }
+        }
+    }
+
+    private final AtomicReference<DestinationDetails> destinations = new AtomicReference<DestinationDetails>(null);
+
     private final ClusterInfoSession session;
     final ClusterId clusterId;
     private final AtomicBoolean isRunning = new AtomicBoolean(false);
@@ -53,17 +71,20 @@ public class MicroshardingRouter implements RoutingStrategy.Router {
         this.setupDestinations.process();
     }
 
+    final static int prime = MicroshardingInbound.prime;
+
     @Override
     public ContainerAddress selectDestinationForMessage(final KeyedMessageWithType message) {
-        final ContainerAddress[] destinationArr = destinations.get();
-        if (destinationArr == null)
+        final DestinationDetails details = destinations.get();
+        if (details == null)
             throw new DempsyException("It appears the Outbound strategy for the message key " +
                     SafeString.objectDescription(message != null ? message.key : null)
                     + " is being used prior to initialization or after a failure.");
-        final int length = destinationArr.length;
-        if (length == 0)
+        final ContainerAddress[] destinationArr = details.desinations;
+        final int mask = details.mask;
+        if (mask == 0)
             return null;
-        return destinationArr[Math.abs(message.key.hashCode() % length)];
+        return destinationArr[(prime * message.key.hashCode()) & mask];
     }
 
     @Override
@@ -75,9 +96,10 @@ public class MicroshardingRouter implements RoutingStrategy.Router {
     @Override
     public Collection<ContainerAddress> allDesintations() {
         // we are only going to consider a destination if it's fully represented.
-        final ContainerAddress[] cur = destinations.get();
-        if (cur == null)
+        final DestinationDetails details = destinations.get();
+        if (details == null)
             return new ArrayList<>();
+        final ContainerAddress[] cur = details.desinations;
         final Set<ContainerAddress> ret = Arrays.stream(cur).filter(ca -> ca != null).collect(Collectors.toSet());
 
         final int nodeCount = ret.size();
@@ -108,9 +130,10 @@ public class MicroshardingRouter implements RoutingStrategy.Router {
      * This makes sure all of the destinations are full.
      */
     boolean isReady() {
-        final ContainerAddress[] ds = destinations.get();
-        if (ds == null)
+        final DestinationDetails details = destinations.get();
+        if (details == null)
             return false;
+        final ContainerAddress[] ds = details.desinations;
         for (final ContainerAddress d : ds)
             if (d == null)
                 return false;
@@ -122,10 +145,16 @@ public class MicroshardingRouter implements RoutingStrategy.Router {
         return ret;
     }
 
-    private static Set<ContainerAddress> shorthand(final ContainerAddress[] addr) {
+    private static final Set<ContainerAddress> shorthand(final ContainerAddress[] addr) {
         if (addr == null)
             return null;
         return Arrays.stream(addr).collect(Collectors.toSet());
+    }
+
+    private static final Set<ContainerAddress> shorthand(final DestinationDetails addr) {
+        if (addr == null)
+            return null;
+        return shorthand(addr.desinations);
     }
 
     private PersistentTask makePersistentTask() {
@@ -136,8 +165,7 @@ public class MicroshardingRouter implements RoutingStrategy.Router {
             public String toString() {
                 final String prefix = "setup or reset known destinations for " + MicroshardingRouter.this;
                 if (LOGGER.isTraceEnabled()) {
-                    final ContainerAddress[] addr = destinations.get();
-                    return prefix + " known destinations=" + shorthand(addr);
+                    return prefix + " known destinations=" + shorthand(destinations.get());
                 } else
                     return prefix;
             }
@@ -157,9 +185,7 @@ public class MicroshardingRouter implements RoutingStrategy.Router {
                     final Collection<String> emptyShards = new ArrayList<String>();
                     final int newtotalAddressCounts = msutils.fillMapFromActiveShards(shardNumbersToShards, session, null);
 
-                    // For now if we hit the race condition between when the target Inbound
-                    // has created the shard and when it assigns the shard info, we simply claim
-                    // we failed.
+                    // This can happen when no MicroshardingInbound has registed yet.
                     if (newtotalAddressCounts < 0 || emptyShards.size() > 0)
                         return false;
 
@@ -172,9 +198,9 @@ public class MicroshardingRouter implements RoutingStrategy.Router {
                         for (final Map.Entry<Integer, ShardInfo> entry : shardNumbersToShards.entrySet())
                             newDestinations[entry.getKey().intValue()] = entry.getValue().destination;
 
-                        destinations.set(newDestinations);
+                        destinations.set(new DestinationDetails(newDestinations));
                     } else
-                        destinations.set(new ContainerAddress[0]);
+                        destinations.set(new DestinationDetails(new ContainerAddress[0]));
 
                     final boolean ret = destinations.get() != null;
 

@@ -2,7 +2,6 @@ package net.dempsy;
 
 import java.io.Serializable;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -238,23 +237,34 @@ public class Router extends Dispatcher implements Service {
             final Map<String, RoutingStrategy.Router> outboundByClusterName = cur.outboundByClusterName;
             final Set<String> uniqueClusters = new HashSet<>();
 
-            Arrays.stream(message.messageTypes).forEach(mt -> {
+            // =================================================================================
+            // For each message type, determine the set of clusters that this message needs to
+            // be sent to. The goal of this loop is to set 'uniqueClusters' to the set of
+            // cluster names that 'message' will be sent to
+            for (final String mt : message.messageTypes) {
                 final List<String> clusterNames = clusterNameByMessageType.get(mt);
                 if (clusterNames == null)
                     LOGGER.trace("No cluster that handles messages of type {}", mt);
                 else
                     uniqueClusters.addAll(clusterNames);
-            });
+            }
+            // =================================================================================
 
+            // =================================================================================
+            // For each cluster that 'message' will be sent to, find the specific containers
+            // within the clusters that it will be sent to.
             final Map<NodeAddress, ContainerAddress> containerByNodeAddress = new HashMap<>();
             // build the list of container addresses by node address by accumulating addresses
             for (final String clusterName : uniqueClusters) {
                 final RoutingStrategy.Router ob = outboundByClusterName.get(clusterName);
                 final ContainerAddress ca = ob.selectDestinationForMessage(message);
-                // it's possible ca is null
+                // it's possible 'ca' is null when we don't know where to send the message.
                 if (ca == null)
                     LOGGER.info("No way to send the message {} to the cluster {} for the time being", message.message, clusterName);
                 else {
+                    // When the message will be sent to 2 different clusters, but both clusters
+                    // are hosted in the same node, then we send 1 message to 1 ContainerAddress
+                    // where the 'clusters' field contains both container ids.
                     final ContainerAddress already = containerByNodeAddress.get(ca.node);
                     if (already != null) {
                         final int[] ia = new int[already.clusters.length + ca.clusters.length];
@@ -265,6 +275,7 @@ public class Router extends Dispatcher implements Service {
                         containerByNodeAddress.put(ca.node, ca);
                 }
             }
+            // =================================================================================
 
             for (final Map.Entry<NodeAddress, ContainerAddress> e : containerByNodeAddress.entrySet()) {
                 final NodeAddress curNode = e.getKey();
@@ -352,6 +363,8 @@ public class Router extends Dispatcher implements Service {
                         return true;
                     } catch (final RuntimeException rte) {
                         // if we threw an exception after clearing the outbounds we need to restore it.
+                        // This is likely a configuration error so we should probably warn about it.
+                        LOGGER.warn("Unexpected exception while applying a topology update", rte);
                         outbounds.set(obs);
                         throw rte;
                     }

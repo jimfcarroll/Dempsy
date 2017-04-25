@@ -12,7 +12,6 @@ import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
-import java.util.stream.IntStream;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -164,8 +163,8 @@ public class NodeManager implements Infrastructure, AutoCloseable {
                 public boolean execute() {
                     try {
                         final String application = node.application;
-                        session.recursiveMkdir(clusters(application), DirMode.PERSISTENT);
-                        session.recursiveMkdir(nodes(application), DirMode.PERSISTENT);
+                        session.recursiveMkdir(clusters(application), null, DirMode.PERSISTENT, DirMode.PERSISTENT);
+                        session.recursiveMkdir(nodes(application), null, DirMode.PERSISTENT, DirMode.PERSISTENT);
 
                         final String nodePath = nodes(application) + "/" + nodeId;
 
@@ -219,11 +218,12 @@ public class NodeManager implements Infrastructure, AutoCloseable {
         adaptors.entrySet().forEach(e -> threading.runDaemon(() -> tr.track(e.getValue()).start(), "Adaptor-" + e.getKey().clusterName));
 
         // IB routing strategy
-        IntStream.range(0, containers.size()).forEach(i -> {
+        final int numContainers = containers.size();
+        for (int i = 0; i < numContainers; i++) {
             final PerContainer c = containers.get(i);
             c.inboundStrategy.setContainerDetails(c.clusterDefinition.getClusterId(), new ContainerAddress(nodeAddress, i));
             tr.start(c.inboundStrategy, this);
-        });
+        }
 
         if (receiver != null)
             tr.track(receiver).start(nodeReciever, threading);

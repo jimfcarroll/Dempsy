@@ -50,8 +50,8 @@ public class TestElasticity extends DempsyBaseTest {
             { "elasticity/mp-num-rank.xml", },
     };
 
-    public TestElasticity(final String routerId, final String containerId, final String sessCtx, final String tpCtx) {
-        super(LOGGER, routerId, containerId, sessCtx, tpCtx);
+    public TestElasticity(final String routerId, final String containerId, final String sessCtx, final String tpCtx, final String serType) {
+        super(LOGGER, routerId, containerId, sessCtx, tpCtx, serType);
     }
 
     // ========================================================================
@@ -225,7 +225,7 @@ public class TestElasticity extends DempsyBaseTest {
 
             final KeyExtractor ke = new KeyExtractor();
 
-            runCombos("testForProfiler", (r, c, s, t) -> {
+            runCombos("testForProfiler", (r, c, s, t, ser) -> {
                 final boolean ret = "microshard".equals(r);
                 if (ret) {
                     LOGGER.info("=====================================================================================");
@@ -327,7 +327,7 @@ public class TestElasticity extends DempsyBaseTest {
     @Test
     public void testNumberCountDropOneAndReAdd() throws Throwable {
 
-        runCombos("testNumberCountDropOneAndReAdd", (r, c, s, t) -> "microshard".equals(r), actxPath, ns -> {
+        runCombos("testNumberCountDropOneAndReAdd", (r, c, s, t, ser) -> "microshard".equals(r), actxPath, ns -> {
             // keepGoing is for the separate thread that pumps messages into the system.
             final AtomicBoolean keepGoing = new AtomicBoolean(true);
             try {
@@ -391,7 +391,7 @@ public class TestElasticity extends DempsyBaseTest {
 
     @Test
     public void testNumberCountAddOneThenDrop() throws Throwable {
-        runCombos("testNumberCountAddOneThenDrop", (r, c, s, t) -> "microshard".equals(r), actxPath, ns -> {
+        runCombos("testNumberCountAddOneThenDrop", (r, c, s, t, ser) -> "microshard".equals(r), actxPath, ns -> {
             // keepGoing is for the separate thread that pumps messages into the system.
             final AtomicBoolean keepGoing = new AtomicBoolean(true);
             try {

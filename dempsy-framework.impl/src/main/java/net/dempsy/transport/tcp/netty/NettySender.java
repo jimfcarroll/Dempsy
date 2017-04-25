@@ -50,9 +50,6 @@ public final class NettySender implements Sender {
         serializer = new Manager<Serializer>(Serializer.class).getAssociatedInstance(addr.serializerId);
         this.statsCollector = statsCollector;
         this.owner = parent;
-        if (owner.nodeId.equals(addr.getGuid())) {
-            System.out.println("HERE!");
-        }
         reset();
     }
 
@@ -91,25 +88,6 @@ public final class NettySender implements Sender {
             } while (previous.ch.isOpen() && isRunning);
         }
     }
-
-    // private static class Guard implements AutoCloseable {
-    // public final MessageBufferOutput buf;
-    //
-    // public Guard() {
-    // final MessageBufferOutput tmp = pool.poll();
-    // if (tmp != null) {
-    // tmp.reset();
-    // buf = tmp;
-    // } else {
-    // buf = new MessageBufferOutput();
-    // }
-    // }
-    //
-    // @Override
-    // public void close() {
-    // pool.offer(buf);
-    // }
-    // }
 
     private MessageBufferOutput getPooled() {
         final MessageBufferOutput tmp = pool.poll();
@@ -237,9 +215,7 @@ public final class NettySender implements Sender {
             if (!ch.close().await(1000)) {
                 LOGGER.warn("Had an issue closing the sender socket.");
             }
-
         }
-
     }
 
 }

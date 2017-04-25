@@ -24,7 +24,7 @@ public class MessageProcessor implements MessageProcessorLifecycle<Mp> {
         this.messageTypes = new HashSet<>(Arrays.asList(messageTypes));
     }
 
-    public MessageProcessor setEvitable(final boolean isEvictable) {
+    public MessageProcessor setEvictable(final boolean isEvictable) {
         this.isEvictable = isEvictable;
         return this;
     }

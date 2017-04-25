@@ -48,7 +48,7 @@ public class SimpleInboundSide implements RoutingStrategy.Inbound {
                             return true;
                         }
                     }
-                    session.recursiveMkdir(rootDir, DirMode.PERSISTENT);
+                    session.recursiveMkdir(rootDir, null, DirMode.PERSISTENT, DirMode.PERSISTENT);
                     actualDir = session.mkdir(rootDir + "/" + SIMPLE_SUBDIR, address, DirMode.EPHEMERAL_SEQUENTIAL);
                     session.exists(actualDir, this);
                     LOGGER.debug("Registed " + SimpleInboundSide.class.getSimpleName() + " at " + actualDir);

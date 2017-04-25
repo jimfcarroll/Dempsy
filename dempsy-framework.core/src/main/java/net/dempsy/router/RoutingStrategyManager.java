@@ -6,5 +6,4 @@ public class RoutingStrategyManager extends ServiceManager<RoutingStrategy.Facto
     public RoutingStrategyManager() {
         super(RoutingStrategy.Factory.class);
     }
-
 }

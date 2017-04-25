@@ -1,6 +1,5 @@
 package net.dempsy;
 
-import static net.dempsy.util.Functional.recheck;
 import static net.dempsy.util.Functional.uncheck;
 import static net.dempsy.utils.test.ConditionPoll.poll;
 import static org.junit.Assert.assertTrue;
@@ -17,7 +16,6 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
-import org.junit.Ignore;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 import org.junit.runners.Parameterized.Parameters;
@@ -34,18 +32,18 @@ import net.dempsy.config.ClusterId;
 import net.dempsy.config.Node;
 import net.dempsy.router.microshard.MicroshardUtils;
 import net.dempsy.router.microshard.MicroshardUtils.ShardInfo;
+import net.dempsy.serialization.util.ClassTracker;
 import net.dempsy.transport.NodeAddress;
 import net.dempsy.transport.blockingqueue.BlockingQueueAddress;
 import net.dempsy.utils.test.SystemPropertyManager;
 
-@Ignore
 @RunWith(Parameterized.class)
-public class DempsyBaseTest {
+public abstract class DempsyBaseTest {
     /**
     * Setting 'hardcore' to true causes EVERY SINGLE IMPLEMENTATION COMBINATION to be used in
     * every runAllCombinations call. This can make tests run for a loooooong time.
     */
-    public static boolean hardcore = true;
+    public static boolean hardcore = false;
 
     protected Logger LOGGER;
 
@@ -67,6 +65,7 @@ public class DempsyBaseTest {
     protected final String containerId;
     protected final String sessionType;
     protected final String transportType;
+    protected final String serializerType;
 
     protected static final String ROUTER_ID_PREFIX = "net.dempsy.router.";
     protected static final String CONTAINER_ID_PREFIX = "net.dempsy.container.";
@@ -74,15 +73,18 @@ public class DempsyBaseTest {
     protected static final String COLLAB_CTX_SUFFIX = ".xml";
     protected static final String TRANSPORT_CTX_PREFIX = "classpath:/td/transport-";
     protected static final String TRANSPORT_CTX_SUFFIX = ".xml";
-    protected static final int NUM_MICROSHARDS = 12;
+    protected static final String SERIALIZER_CTX_PREFIX = "classpath:/td/serializer-";
+    protected static final String SERIALIZER_CTX_SUFFIX = ".xml";
+    protected static final int NUM_MICROSHARDS = 16;
 
     protected DempsyBaseTest(final Logger logger, final String routerId, final String containerId,
-            final String sessionType, final String transportType) {
+            final String sessionType, final String transportType, final String serializerType) {
         this.LOGGER = logger;
         this.routerId = routerId;
         this.containerId = containerId;
         this.sessionType = sessionType;
         this.transportType = transportType;
+        this.serializerType = serializerType;
     }
 
     private static class Combos {
@@ -90,12 +92,15 @@ public class DempsyBaseTest {
         final String[] containers;
         final String[] sessions;
         final String[] transports;
+        final String[] serializers;
 
-        public Combos(final String[] routers, final String[] containers, final String[] sessions, final String[] transports) {
+        public Combos(final String[] routers, final String[] containers, final String[] sessions, final String[] transports,
+                final String[] serializers) {
             this.routers = routers;
             this.containers = containers;
             this.sessions = sessions;
             this.transports = transports;
+            this.serializers = serializers;
         }
     }
 
@@ -104,7 +109,8 @@ public class DempsyBaseTest {
                 new String[] { "simple", "microshard" },
                 new String[] { "locking", "nonlocking", "altnonlocking" },
                 new String[] { "local", "zookeeper" },
-                new String[] { "bq", "passthrough", "netty" });
+                new String[] { "bq", "passthrough", "netty" },
+                new String[] { "json", "java", "kryo" });
 
     }
 
@@ -113,11 +119,18 @@ public class DempsyBaseTest {
                 new String[] { "microshard" },
                 new String[] { "altnonlocking" },
                 new String[] { "zookeeper" },
-                new String[] { "netty" });
+                new String[] { "netty" },
+                new String[] { "kryo" });
 
     }
 
-    @Parameters(name = "{index}: routerId={0}, container={1}, cluster={2}, transport={3}")
+    public static String[] transportsThatRequireSerializer = { "netty" };
+
+    public static boolean requiresSerialization(final String transport) {
+        return Arrays.asList(transportsThatRequireSerializer).contains(transport);
+    }
+
+    @Parameters(name = "{index}: routerId={0}, container={1}, cluster={2}, transport={3}/{4}")
     public static Collection<Object[]> combos() {
         final Combos combos = (hardcore) ? hardcore() : production();
 
@@ -126,7 +139,11 @@ public class DempsyBaseTest {
             for (final String container : combos.containers) {
                 for (final String sessFact : combos.sessions) {
                     for (final String tp : combos.transports) {
-                        ret.add(new Object[] { router, container, sessFact, tp });
+                        if (requiresSerialization(tp)) {
+                            for (final String ser : combos.serializers)
+                                ret.add(new Object[] { router, container, sessFact, tp, ser });
+                        } else
+                            ret.add(new Object[] { router, container, sessFact, tp, "none" });
                     }
                 }
             }
@@ -167,7 +184,8 @@ public class DempsyBaseTest {
 
     @FunctionalInterface
     public static interface ComboFilter {
-        public boolean filter(final String routerId, final String containerId, final String sessionType, final String transportId);
+        public boolean filter(final String routerId, final String containerId, final String sessionType, final String transportId,
+                final String serializerType);
     }
 
     private static final String[] frameworkCtx = { "classpath:/td/node.xml" };
@@ -197,7 +215,7 @@ public class DempsyBaseTest {
 
     protected void runCombos(final String testName, final ComboFilter filter, final String[][] ctxs, final String[][][] perNodeProps,
             final TestToRun test) throws Exception {
-        if (filter != null && !filter.filter(routerId, containerId, sessionType, transportType))
+        if (filter != null && !filter.filter(routerId, containerId, sessionType, transportType, serializerType))
             return;
 
         currentAppName = testName + "-" + runComboSequence.getAndIncrement();
@@ -234,7 +252,8 @@ public class DempsyBaseTest {
                     })
                     .collect(Collectors.toList());
 
-            recheck(() -> cpCtxs.forEach(n -> assertTrue(uncheck(() -> poll(o -> n.manager.isReady())))), InterruptedException.class);
+            for (final NodeManagerWithContext n : cpCtxs)
+                assertTrue(poll(o -> n.manager.isReady()));
 
             test.test(new Nodes(cpCtxs, sessFact));
             currentlyTracking = null;
@@ -242,6 +261,7 @@ public class DempsyBaseTest {
 
         LocalClusterSessionFactory.completeReset();
         BlockingQueueAddress.completeReset();
+        ClassTracker.dumpResults();
     }
 
     @SuppressWarnings("resource")
@@ -249,6 +269,8 @@ public class DempsyBaseTest {
         final List<String> fullCtx = new ArrayList<>(Arrays.asList(ctxArr));
         fullCtx.addAll(Arrays.asList(frameworkCtx));
         fullCtx.add(TRANSPORT_CTX_PREFIX + transportType + TRANSPORT_CTX_SUFFIX);
+        if (!"none".equals(serializerType))
+            fullCtx.add(SERIALIZER_CTX_PREFIX + serializerType + SERIALIZER_CTX_SUFFIX);
         LOGGER.debug("Starting node with {}", fullCtx);
         final ClassPathXmlApplicationContext ctx = currentlyTracking
                 .track(new ClassPathXmlApplicationContext(fullCtx.toArray(new String[fullCtx.size()])));

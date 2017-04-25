@@ -29,6 +29,7 @@ import net.dempsy.cluster.ClusterInfoWatcher;
 import net.dempsy.cluster.DirMode;
 import net.dempsy.config.ClusterId;
 import net.dempsy.router.RoutingStrategy.ContainerAddress;
+import net.dempsy.router.RoutingStrategy.Inbound;
 import net.dempsy.util.SafeString;
 
 public class MicroshardUtils {
@@ -77,9 +78,7 @@ public class MicroshardUtils {
     }
 
     public final void mkClusterDir(final ClusterInfoSession session) throws ClusterInfoException {
-        session.recursiveMkdir(clusterDir, DirMode.PERSISTENT);
-        if (clusterInfo != null)
-            session.setData(clusterDir, clusterInfo);
+        session.recursiveMkdir(clusterDir, clusterInfo, DirMode.PERSISTENT, DirMode.PERSISTENT);
     }
 
     public final void mkAllDirs(final ClusterInfoSession session) throws ClusterInfoException {
@@ -118,8 +117,13 @@ public class MicroshardUtils {
     * @param mapToFill is the map to fill from the ClusterInfo.
     * @param session is the ClusterInfoSession to get retrieve the data from.
     * @param watcher, if not null, will be set as the watcher on the shard directory for this cluster.
-    * @return the totalAddressCount from each shard. These are supposed to be repeated in each 
-    * {@link ShardInfo}.
+    * @return There's 3 possible return values:
+    * <ul>
+    * <li>-1. This happens when we're on the client side and we beat all registrations to checking.</li>
+    * <li>0. This happens when we're on the {@link Inbound} side but we're the first in.</li> 
+    * <li>The totalAddressCount from each shard. These are supposed to be repeated in each 
+    * {@link ShardInfo}.</li>
+    * </ul>
     */
     int fillMapFromActiveShards(final Map<Integer, ShardInfo> mapToFill, final ClusterInfoSession session, final ClusterInfoWatcher watcher)
             throws ClusterInfoException {

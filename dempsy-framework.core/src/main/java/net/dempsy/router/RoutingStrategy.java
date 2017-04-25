@@ -27,12 +27,28 @@ import net.dempsy.transport.NodeAddress;
 
 public interface RoutingStrategy {
 
+    /**
+     * A {@link ContainerAddress} represents the address of a message processor's
+     * container within a node. In the case where a message is sent to 2 containers
+     * within a node (possible when one node hosts both containers, each one part
+     * of a different cluster) the {@code clusters} array will contain the index
+     * of both containers.
+     */
     public static final class ContainerAddress implements Serializable {
         private static final long serialVersionUID = 1L;
+
+        /**
+         * The address of the node housing the container(s)
+         */
         public final NodeAddress node;
+
+        /**
+         * The set of indices for each Container within the node that a message
+         * will be sent to.
+         */
         public final int[] clusters;
 
-        @SuppressWarnings("unused")
+        @SuppressWarnings("unused") // (de)serialization requirement
         private ContainerAddress() {
             node = null;
             clusters = null;
@@ -87,16 +103,29 @@ public interface RoutingStrategy {
          * Get the routing strategy associated with the downstream cluster denoted
          * but {@code clusterId}. There should be no need to {@code start()} the 
          * Router that's returned. Since the {@link Factory} is the manager for
-         * the {@link Router}s the caller should {@code release} the {@link Router}
+         * the {@link Router}s, the caller should {@code release} the {@link Router}
          * when it's done. 
          */
         public Router getStrategy(ClusterId clusterId);
     }
 
+    /**
+     * The Router's responsibility is to provide the {@link ContainerAddress} of the 
+     * destination of the {@link KeyedMessageWithType}. A Router is a cluster level object
+     * so the set of destinations visible from a particular instance will be specifically 
+     * for the cluster.
+     */
     public static interface Router {
 
+        /**
+         * Determine the destination for this given message. 
+         */
         public ContainerAddress selectDestinationForMessage(KeyedMessageWithType message);
 
+        /**
+         * What are the complete set of visible destinations for the cluster who's 
+         * {@link ClusterId} was used to retrieve this Router.
+         */
         public Collection<ContainerAddress> allDesintations();
 
         /**
@@ -106,6 +135,10 @@ public interface RoutingStrategy {
     }
 
     public static interface Inbound extends Service {
+        /**
+         * This method will be called prior to start to provide context for the operation
+         * of the Inbound strategy.
+         */
         public void setContainerDetails(ClusterId clusterId, ContainerAddress address);
 
         /**
@@ -115,6 +148,10 @@ public interface RoutingStrategy {
          */
         public boolean doesMessageKeyBelongToNode(Object messageKey);
 
+        /**
+         * Provide the routing strategy id for the {@link RoutingStrategyManager} to look 
+         * up the {@link Router} from clients of this container.
+         */
         public default String routingStrategyTypeId() {
             return this.getClass().getPackage().getName();
         }

@@ -1,7 +1,6 @@
 package net.dempsy.monitoring.dummy;
 
 import net.dempsy.monitoring.ClusterStatsCollector;
-import net.dempsy.monitoring.StatsCollector.TimerContext;
 
 public class DummyClusterStatsCollector implements ClusterStatsCollector {
 
