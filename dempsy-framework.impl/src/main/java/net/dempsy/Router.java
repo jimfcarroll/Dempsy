@@ -1,6 +1,5 @@
 package net.dempsy;
 
-import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
@@ -25,6 +24,7 @@ import net.dempsy.router.RoutingStrategy;
 import net.dempsy.router.RoutingStrategy.ContainerAddress;
 import net.dempsy.router.RoutingStrategyManager;
 import net.dempsy.transport.NodeAddress;
+import net.dempsy.transport.RoutedMessage;
 import net.dempsy.transport.Sender;
 import net.dempsy.transport.SenderFactory;
 import net.dempsy.transport.TransportManager;
@@ -425,26 +425,6 @@ public class Router extends Dispatcher implements Service {
         synchronized (isRunning) {
             isRunning.set(false);
             stopEm(outbounds.getAndSet(null));
-        }
-    }
-
-    public static class RoutedMessage implements Serializable {
-        private static final long serialVersionUID = 1L;
-        public final int[] containers;
-        public final Object key;
-        public final Object message;
-
-        @SuppressWarnings("unused")
-        private RoutedMessage() {
-            containers = null;
-            key = null;
-            message = null;
-        }
-
-        public RoutedMessage(final int[] containers, final Object key, final Object message) {
-            this.containers = containers;
-            this.key = key;
-            this.message = message;
         }
     }
 

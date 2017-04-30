@@ -2,11 +2,11 @@ package net.dempsy.threading;
 
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
-import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicLong;
@@ -16,7 +16,7 @@ public class DefaultThreadingModel implements ThreadingModel {
     private static final int minNumThreads = 4;
 
     private ScheduledExecutorService schedule = null;
-    private ThreadPoolExecutor executor = null;
+    private ExecutorService executor = null;
     private AtomicLong numLimited = null;
     private long maxNumWaitingLimitedTasks;
     private int threadPoolSize;
@@ -98,7 +98,7 @@ public class DefaultThreadingModel implements ThreadingModel {
                                                                                             // then use the other constructor
             threadPoolSize = Math.max(cpuBasedThreadCount, minNumThreads);
         }
-        executor = (ThreadPoolExecutor) Executors.newFixedThreadPool(threadPoolSize,
+        executor = Executors.newFixedThreadPool(threadPoolSize,
                 r -> new Thread(r, nameSupplier.get()));
         schedule = Executors.newSingleThreadScheduledExecutor(r -> new Thread(r, nameSupplier.get() + "-Scheduled"));
         numLimited = new AtomicLong(0);
@@ -138,11 +138,6 @@ public class DefaultThreadingModel implements ThreadingModel {
             if (schedule != null)
                 schedule.shutdown();
         }
-    }
-
-    @Override
-    public int getNumberPending() {
-        return executor.getQueue().size();
     }
 
     @Override

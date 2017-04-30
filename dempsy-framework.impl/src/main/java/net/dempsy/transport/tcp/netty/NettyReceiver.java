@@ -25,52 +25,37 @@ import io.netty.handler.codec.ByteToMessageDecoder;
 import io.netty.util.ReferenceCountUtil;
 import io.netty.util.concurrent.Future;
 import net.dempsy.DempsyException;
-import net.dempsy.Router.RoutedMessage;
 import net.dempsy.serialization.Serializer;
 import net.dempsy.threading.ThreadingModel;
 import net.dempsy.transport.Listener;
 import net.dempsy.transport.MessageTransportException;
-import net.dempsy.transport.Receiver;
+import net.dempsy.transport.RoutedMessage;
+import net.dempsy.transport.tcp.AbstractTcpReceiver;
 import net.dempsy.transport.tcp.TcpAddress;
-import net.dempsy.transport.tcp.TcpAddressResolver;
 import net.dempsy.transport.tcp.TcpUtils;
 import net.dempsy.util.io.MessageBufferInput;
 
-public class NettyReceiver<T> implements Receiver {
+public class NettyReceiver<T> extends AbstractTcpReceiver<NettyReceiver<T>> {
     private static final Logger LOGGER = LoggerFactory.getLogger(NettyReceiver.class);
-    private TcpAddressResolver resolver = a -> a;
-    private TcpAddress address = null;
+
     private TcpAddress internal = null;
-    private boolean useLocalHost = false;
-    private int internalPort = -1;
+    private TcpAddress address = null;
+    private final boolean useLocalHost = false;
     private int numHandlers = 1;
     private EventLoopGroup parentGroup = null;
     private EventLoopGroup childGroup = null;
     private Listener<T> typedListener = null;
 
-    private final Serializer serializer;
-
     public NettyReceiver(final Serializer serializer, final int port) {
-        this.internalPort = port;
-        this.serializer = serializer;
+        super(serializer, port);
     }
 
     public NettyReceiver(final Serializer serializer) {
         this(serializer, -1);
     }
 
-    public NettyReceiver<T> setUseLocalHost(final boolean useLocalHost) {
-        this.useLocalHost = useLocalHost;
-        return this;
-    }
-
     public NettyReceiver<T> setNumHandlers(final int numHandlers) {
         this.numHandlers = numHandlers;
-        return this;
-    }
-
-    public NettyReceiver<T> setResolver(final TcpAddressResolver resolver) {
-        this.resolver = resolver;
         return this;
     }
 
@@ -199,7 +184,7 @@ public class NettyReceiver<T> implements Receiver {
             if (in.readableBytes() < 2)
                 return;
 
-            try (ResetReaderIndex rr = new ResetReaderIndex(in.markReaderIndex());) {
+            try (final ResetReaderIndex rr = new ResetReaderIndex(in.markReaderIndex());) {
                 final short tmpsize = in.readShort();
                 final int size;
                 if (tmpsize == -1) {
@@ -223,11 +208,19 @@ public class NettyReceiver<T> implements Receiver {
                 final byte[] data = new byte[size];
                 in.readBytes(data);
                 rr.clear();
-                try (MessageBufferInput mbi = new MessageBufferInput(data);) {
-                    @SuppressWarnings("unchecked")
-                    final T rm = (T) serializer.deserialize(mbi, RoutedMessage.class);
-                    listener.onMessage(rm); // this should process the message asynchronously
-                }
+
+                final MessageBufferInput mbi = new MessageBufferInput(data);
+                listener.onMessage(() -> {
+                    try {
+                        @SuppressWarnings("unchecked")
+                        final T rm = (T) serializer.deserialize(mbi, RoutedMessage.class);
+                        mbi.close();
+                        return rm;
+                    } catch (final IOException ioe) {
+                        LOGGER.error("Failure on deserialization", ioe);
+                        throw new DempsyException(ioe);
+                    }
+                });
             }
         }
 

@@ -95,7 +95,7 @@ public abstract class DempsyBaseTest {
     }
 
     public static List<String> elasticRouterIds = Arrays.asList("managed");
-    public static String[] transportsThatRequireSerializer = { "netty" };
+    public static String[] transportsThatRequireSerializer = { "netty", "nio" };
 
     public static Combos hardcore() {
         return new Combos(
@@ -111,7 +111,7 @@ public abstract class DempsyBaseTest {
                 new String[] { "managed" },
                 new String[] { "altnonlocking" },
                 new String[] { "zookeeper" },
-                new String[] { "netty" },
+                new String[] { "nio", "netty" },
                 new String[] { "kryo" });
 
     }

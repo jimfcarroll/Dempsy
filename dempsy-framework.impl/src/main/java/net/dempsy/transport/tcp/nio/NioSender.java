@@ -1,4 +1,4 @@
-package net.dempsy.transport.tcp.netty;
+package net.dempsy.transport.tcp.nio;
 
 import java.util.List;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -28,9 +28,10 @@ import net.dempsy.serialization.Serializer;
 import net.dempsy.transport.MessageTransportException;
 import net.dempsy.transport.Sender;
 import net.dempsy.transport.tcp.TcpAddress;
+import net.dempsy.transport.tcp.netty.NettySender;
 import net.dempsy.util.io.MessageBufferOutput;
 
-public final class NettySender implements Sender {
+public final class NioSender implements Sender {
     private final static ConcurrentLinkedQueue<MessageBufferOutput> pool = new ConcurrentLinkedQueue<>();
 
     private final static Logger LOGGER = LoggerFactory.getLogger(NettySender.class);
@@ -39,13 +40,13 @@ public final class NettySender implements Sender {
     private final NodeStatsCollector statsCollector;
     private final TcpAddress addr;
     private final Serializer serializer;
-    private final NettySenderFactory owner;
+    private final NioSenderFactory owner;
     private final AtomicReference<Internal> connection = new AtomicReference<>(null);
     private final EventLoopGroup group;
 
     private boolean isRunning = true;
 
-    NettySender(final TcpAddress addr, final NettySenderFactory parent, final NodeStatsCollector statsCollector,
+    NioSender(final TcpAddress addr, final NioSenderFactory parent, final NodeStatsCollector statsCollector,
             final Manager<Serializer> serializerManger, final EventLoopGroup group) {
         this.addr = addr;
         serializer = serializerManger.getAssociatedInstance(addr.serializerId);
@@ -155,7 +156,7 @@ public final class NettySender implements Sender {
                                     public void exceptionCaught(final ChannelHandlerContext ctx, final Throwable cause) throws Exception {
                                         LOGGER.error("Failed writing to {}", addr, cause);
                                         // TODO: pass the failed message over for another try.
-                                        NettySender.this.reset();
+                                        NioSender.this.reset();
                                     }
                                 });
                             }

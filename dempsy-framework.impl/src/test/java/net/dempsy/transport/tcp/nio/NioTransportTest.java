@@ -1,20 +1,26 @@
-package net.dempsy.transport.tcp.netty;
+package net.dempsy.transport.tcp.nio;
 
 import static net.dempsy.util.Functional.chain;
 import static net.dempsy.utils.test.ConditionPoll.poll;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
+import java.util.Arrays;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
+import org.junit.runners.Parameterized.Parameters;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -26,17 +32,34 @@ import net.dempsy.serialization.kryo.KryoSerializer;
 import net.dempsy.threading.DefaultThreadingModel;
 import net.dempsy.transport.Listener;
 import net.dempsy.transport.RoutedMessage;
+import net.dempsy.transport.Sender;
+import net.dempsy.transport.SenderFactory;
 import net.dempsy.transport.tcp.TcpAddress;
+import net.dempsy.transport.tcp.netty.NettySenderFactory;
 import net.dempsy.util.TestInfrastructure;
 
-public class NettyTransportTest {
-    private static final Logger LOGGER = LoggerFactory.getLogger(NettyTransportTest.class);
+@RunWith(Parameterized.class)
+public class NioTransportTest {
+    private static final Logger LOGGER = LoggerFactory.getLogger(NioTransportTest.class);
+
+    private final Supplier<SenderFactory> senderFactory;
+
+    public NioTransportTest(final String senderFactoryName, final Supplier<SenderFactory> senderFactory) {
+        this.senderFactory = senderFactory;
+    }
+
+    @Parameters(name = "{index}: senderfactory={0}")
+    public static Collection<Object[]> combos() {
+        return Arrays.asList(new Object[][] {
+                { "netty", (Supplier<SenderFactory>) () -> new NettySenderFactory() }
+        });
+    }
 
     @Test
     public void testReceiverStart() throws Exception {
         final AtomicBoolean resolverCalled = new AtomicBoolean(false);
         try (ServiceTracker tr = new ServiceTracker();) {
-            final NettyReceiver<RoutedMessage> r = tr.track(new NettyReceiver<RoutedMessage>(new JsonSerializer()))
+            final NioReceiver<RoutedMessage> r = tr.track(new NioReceiver<RoutedMessage>(new JsonSerializer()))
                     .setNumHandlers(2)
                     .setResolver(a -> {
                         resolverCalled.set(true);
@@ -45,7 +68,7 @@ public class NettyTransportTest {
 
             final TcpAddress addr = r.getAddress();
             LOGGER.debug(addr.toString());
-            r.start(null, tr.track(new DefaultThreadingModel(NettyTransportTest.class.getSimpleName() + ".testReceiverStart")));
+            r.start(null, tr.track(new DefaultThreadingModel(NioTransportTest.class.getSimpleName() + ".testReceiverStart")));
 
             assertTrue(resolverCalled.get());
         }
@@ -55,7 +78,7 @@ public class NettyTransportTest {
     public void testMessage() throws Exception {
         final AtomicBoolean resolverCalled = new AtomicBoolean(false);
         try (ServiceTracker tr = new ServiceTracker();) {
-            final NettyReceiver<RoutedMessage> r = tr.track(new NettyReceiver<RoutedMessage>(new KryoSerializer()))
+            final NioReceiver<RoutedMessage> r = tr.track(new NioReceiver<RoutedMessage>(new KryoSerializer()))
                     .setNumHandlers(2)
                     .setResolver(a -> {
                         resolverCalled.set(true);
@@ -68,16 +91,16 @@ public class NettyTransportTest {
             r.start((Listener<RoutedMessage>) msg -> {
                 rm.set(msg);
                 return true;
-            }, tr.track(new DefaultThreadingModel(NettyTransportTest.class.getSimpleName() + ".testReceiverStart")));
+            }, tr.track(new DefaultThreadingModel(NioTransportTest.class.getSimpleName() + ".testReceiverStart")));
 
-            try (final NettySenderFactory sf = new NettySenderFactory();) {
+            try (final SenderFactory sf = senderFactory.get();) {
                 sf.start(new TestInfrastructure(null, null) {
                     @Override
                     public String getNodeId() {
                         return "test";
                     }
                 });
-                final NettySender sender = sf.getSender(addr);
+                final Sender sender = sf.getSender(addr);
                 sender.send(new RoutedMessage(new int[] { 0 }, "Hello", "Hello"));
 
                 assertTrue(resolverCalled.get());
@@ -92,12 +115,13 @@ public class NettyTransportTest {
         final AtomicBoolean resolverCalled = new AtomicBoolean(false);
         final String huge = TestWordCount.readBible();
         try (ServiceTracker tr = new ServiceTracker();) {
-            final NettyReceiver<RoutedMessage> r = tr.track(new NettyReceiver<RoutedMessage>(new JsonSerializer()))
+            final NioReceiver<RoutedMessage> r = tr.track(new NioReceiver<RoutedMessage>(new JsonSerializer()))
                     .setNumHandlers(2)
                     .setResolver(a -> {
                         resolverCalled.set(true);
                         return a;
-                    }).setUseLocalHost(true);
+                    }).setUseLocalHost(true)
+                    .setMaxMessageSize(1024 * 1024 * 1024);
 
             final TcpAddress addr = r.getAddress();
             LOGGER.debug(addr.toString());
@@ -105,11 +129,11 @@ public class NettyTransportTest {
             r.start((Listener<RoutedMessage>) msg -> {
                 rm.set(msg);
                 return true;
-            }, tr.track(new DefaultThreadingModel(NettyTransportTest.class.getSimpleName() + ".testReceiverStart")));
+            }, tr.track(new DefaultThreadingModel(NioTransportTest.class.getSimpleName() + ".testReceiverStart")));
 
-            try (final NettySenderFactory sf = new NettySenderFactory();) {
+            try (final SenderFactory sf = senderFactory.get();) {
                 sf.start(new TestInfrastructure(null, null));
-                final NettySender sender = sf.getSender(addr);
+                final Sender sender = sf.getSender(addr);
                 sender.send(new RoutedMessage(new int[] { 0 }, "Hello", huge));
 
                 assertTrue(resolverCalled.get());
@@ -123,12 +147,13 @@ public class NettyTransportTest {
             throws Exception {
         final AtomicBoolean resolverCalled = new AtomicBoolean(false);
         try (final ServiceTracker tr = new ServiceTracker();) {
-            final NettyReceiver<RoutedMessage> r = tr.track(new NettyReceiver<RoutedMessage>(serializer))
+            final NioReceiver<RoutedMessage> r = tr.track(new NioReceiver<RoutedMessage>(serializer))
                     .setNumHandlers(2)
                     .setResolver(a -> {
                         resolverCalled.set(true);
                         return a;
-                    }).setUseLocalHost(true);
+                    }).setUseLocalHost(true)
+                    .setMaxMessageSize(1024 * 1024 * 1024);;
 
             final TcpAddress addr = r.getAddress();
             LOGGER.debug(addr.toString());
@@ -136,22 +161,22 @@ public class NettyTransportTest {
             r.start((Listener<RoutedMessage>) msg -> {
                 msgCount.incrementAndGet();
                 return true;
-            }, tr.track(new DefaultThreadingModel(NettyTransportTest.class.getSimpleName() + ".testReceiverStart")));
+            }, tr.track(new DefaultThreadingModel(NioTransportTest.class.getSimpleName() + ".testReceiverStart")));
 
             final AtomicBoolean letMeGo = new AtomicBoolean(false);
             final List<Thread> threads = IntStream.range(0, numThreads).mapToObj(threadNum -> new Thread(() -> {
-                try (final NettySenderFactory sf = new NettySenderFactory();) {
+                try (final SenderFactory sf = senderFactory.get();) {
                     sf.start(new TestInfrastructure(null, null) {
 
                         @Override
                         public Map<String, String> getConfiguration() {
                             final Map<String, String> ret = new HashMap<>();
-                            ret.put(NettySenderFactory.class.getPackage().getName() + "." + NettySenderFactory.CONFIG_KEY_SENDER_THREADS, "2");
+                            ret.put(sf.getClass().getPackage().getName() + "." + NettySenderFactory.CONFIG_KEY_SENDER_THREADS, "2");
                             return ret;
                         }
 
                     });
-                    final NettySender sender = sf.getSender(addr);
+                    final Sender sender = sf.getSender(addr);
                     while (!letMeGo.get())
                         Thread.yield();
                     for (int i = 0; i < numMessagePerThread; i++)
