@@ -33,14 +33,14 @@ import net.dempsy.transport.tcp.TcpUtils;
 import net.dempsy.util.io.MessageBufferInput;
 import net.dempsy.util.io.MessageBufferOutput;
 
-public class NioReceiver<T> extends AbstractTcpReceiver<NioReceiver<T>> {
+public class NioReceiver<T> extends AbstractTcpReceiver<NioAddress, NioReceiver<T>> {
     private static Logger LOGGER = LoggerFactory.getLogger(NioReceiver.class);
     public final static int DEFAULT_MAX_MESSAGE_SIZE_BYTES = 1024 * 1024;
 
     private final AtomicBoolean isRunning = new AtomicBoolean(true);
 
-    private TcpAddress internal = null;
-    private TcpAddress address = null;
+    private NioAddress internal = null;
+    private NioAddress address = null;
     private Binding binding = null;
     private Acceptor acceptor = null;
     private int maxMessageSize = DEFAULT_MAX_MESSAGE_SIZE_BYTES;
@@ -77,7 +77,7 @@ public class NioReceiver<T> extends AbstractTcpReceiver<NioReceiver<T>> {
                 binding = new Binding(addr, internalPort);
                 final InetSocketAddress inetSocketAddress = binding.bound;
                 internalPort = inetSocketAddress.getPort();
-                internal = new TcpAddress(addr, internalPort, serId);
+                internal = new NioAddress(addr, internalPort, serId);
                 address = resolver.getExternalAddresses(internal);
             } catch (final IOException e) {
                 throw new DempsyException(e);
@@ -212,7 +212,7 @@ public class NioReceiver<T> extends AbstractTcpReceiver<NioReceiver<T>> {
             final ServerSocketChannel serverChannel = (ServerSocketChannel) key.channel();
             final SocketChannel channel = serverChannel.accept();
 
-            LOGGER.trace("Accepting connection from " + channel.getRemoteAddress());
+            LOGGER.trace(thisNode + " is accepting a connection from " + channel.getRemoteAddress());
 
             reader.newClient(channel);
         }
@@ -338,11 +338,11 @@ public class NioReceiver<T> extends AbstractTcpReceiver<NioReceiver<T>> {
         private void closeup(final SocketChannel channel, final SelectionKey key) {
             final Socket socket = channel.socket();
             final SocketAddress remoteAddr = socket.getRemoteSocketAddress();
-            LOGGER.debug(thisNode + "Connection closed by client: " + remoteAddr);
+            LOGGER.debug(thisNode + " had a connection closed by client: " + remoteAddr);
             try {
                 channel.close();
             } catch (final IOException ioe) {
-                LOGGER.error("Failed to close the channerl for receiver at " + thisNode + " receiving data from " + remoteAddr + ". Ingoring", ioe);
+                LOGGER.error(thisNode + " failed to close the receiver channel receiving data from " + remoteAddr + ". Ingoring", ioe);
             }
             key.cancel();
         }
@@ -407,7 +407,7 @@ public class NioReceiver<T> extends AbstractTcpReceiver<NioReceiver<T>> {
                     final T rm = (T) serializer.deserialize(mbi, RoutedMessage.class);
                     return rm;
                 } catch (final IOException ioe) {
-                    LOGGER.error("Failure on deserialization", ioe);
+                    LOGGER.error(thisNode + " failed on deserialization", ioe);
                     throw new DempsyException(ioe);
                 }
             });
@@ -457,7 +457,7 @@ public class NioReceiver<T> extends AbstractTcpReceiver<NioReceiver<T>> {
                                 if (key.isReadable()) {
                                     ((Client<?>) key.attachment()).read(key);
                                 } else // this shouldn't be possible
-                                    LOGGER.info("An unexpexted selection key " + key);
+                                    LOGGER.info(thisNode + " reciever got an unexpexted selection key " + key);
                             }
                         } else if (isRunning.get() && !done.get()) {
 
@@ -468,7 +468,7 @@ public class NioReceiver<T> extends AbstractTcpReceiver<NioReceiver<T>> {
                                 newClient.configureBlocking(false);
                                 final Socket socket = newClient.socket();
                                 final SocketAddress remote = socket.getRemoteSocketAddress();
-                                LOGGER.info(thisNode + " received connection from " + remote);
+                                LOGGER.debug(thisNode + " received connection from " + remote);
                                 newClient.register(selector, SelectionKey.OP_READ,
                                         new Client<T>(thisNode, typedListener, serializer, maxMessageSize));
                             }
@@ -496,7 +496,7 @@ public class NioReceiver<T> extends AbstractTcpReceiver<NioReceiver<T>> {
                 Thread.yield();
 
             // wait until the Reader runnable takes it.
-            while (landing.get() != null) {
+            while (landing.get() != null && isRunning.get() && !done.get()) {
                 selector.wakeup();
                 Thread.yield();
             }

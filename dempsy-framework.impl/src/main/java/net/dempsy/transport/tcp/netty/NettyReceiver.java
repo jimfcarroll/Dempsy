@@ -35,7 +35,7 @@ import net.dempsy.transport.tcp.TcpAddress;
 import net.dempsy.transport.tcp.TcpUtils;
 import net.dempsy.util.io.MessageBufferInput;
 
-public class NettyReceiver<T> extends AbstractTcpReceiver<NettyReceiver<T>> {
+public class NettyReceiver<T> extends AbstractTcpReceiver<TcpAddress, NettyReceiver<T>> {
     private static final Logger LOGGER = LoggerFactory.getLogger(NettyReceiver.class);
 
     private TcpAddress internal = null;

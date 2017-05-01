@@ -242,6 +242,11 @@ public class NonLockingContainer extends Container {
 
     @Override
     public void dispatch(final KeyedMessage message, final boolean block) throws IllegalArgumentException, ContainerException {
+        if (!isRunningLazy) {
+            LOGGER.debug("Dispacth called on stopped container");
+            statCollector.messageFailed(false);
+        }
+
         if (message == null)
             return; // No. We didn't process the null message
 
@@ -250,6 +255,13 @@ public class NonLockingContainer extends Container {
 
         if (message.key == null)
             throw new ContainerException("Message " + objectDescription(message.message) + " contains no key.");
+
+        if (!inbound.doesMessageKeyBelongToNode(message.key)) {
+            if (LOGGER.isDebugEnabled())
+                LOGGER.debug("Message with key " + SafeString.objectDescription(message.key) + " sent to wrong container. ");
+            statCollector.messageFailed(false);
+            return;
+        }
 
         final Object key = message.key;
 
@@ -320,7 +332,7 @@ public class NonLockingContainer extends Container {
                     }
                 } finally {
                     if (working.remove(key) == null)
-                        System.out.println("WTF?");
+                        LOGGER.error("IMPOSSIBLE! Null key removed from working set.", new RuntimeException());
                 }
             } else { // ... we didn't get the lock
                 if (!block) { // blocking means no collisions allowed.

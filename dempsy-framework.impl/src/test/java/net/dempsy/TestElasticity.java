@@ -241,7 +241,7 @@ public class TestElasticity extends DempsyBaseTest {
                     // gather the collection of reachable ContainerAddresses from each Router to the given cluster.
                     .map(r -> {
                         if (showLog)
-                            LOGGER.trace("From {}", r.thisNode());
+                            LOGGER.trace("From {}", r.thisNodeId());
                         return r.allReachable(cluster);
                     })
                     // extract a set of NodeAddresses from each of the ContainerAddress collections
@@ -553,7 +553,10 @@ public class TestElasticity extends DempsyBaseTest {
                     waitForEvenShardDistribution(session, "test-cluster1", 2, nodes);
 
                     // about 1/2 should drop out.
-                    assertTrue(poll(o -> sc.getMessageProcessorCount() < 15L));
+                    assertTrue(poll(o -> {
+                        // System.err.println(sc.getMessageProcessorCount());
+                        return sc.getMessageProcessorCount() < 15L;
+                    }));
                 }
 
             } finally {

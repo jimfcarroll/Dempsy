@@ -27,7 +27,6 @@ import net.dempsy.monitoring.NodeStatsCollector;
 import net.dempsy.serialization.Serializer;
 import net.dempsy.transport.MessageTransportException;
 import net.dempsy.transport.Sender;
-import net.dempsy.transport.tcp.TcpAddress;
 import net.dempsy.transport.tcp.netty.NettySender;
 import net.dempsy.util.io.MessageBufferOutput;
 
@@ -38,7 +37,7 @@ public final class NioSender implements Sender {
     private static final AtomicLong threadNum = new AtomicLong(0);
 
     private final NodeStatsCollector statsCollector;
-    private final TcpAddress addr;
+    private final NioAddress addr;
     private final Serializer serializer;
     private final NioSenderFactory owner;
     private final AtomicReference<Internal> connection = new AtomicReference<>(null);
@@ -46,7 +45,7 @@ public final class NioSender implements Sender {
 
     private boolean isRunning = true;
 
-    NioSender(final TcpAddress addr, final NioSenderFactory parent, final NodeStatsCollector statsCollector,
+    NioSender(final NioAddress addr, final NioSenderFactory parent, final NodeStatsCollector statsCollector,
             final Manager<Serializer> serializerManger, final EventLoopGroup group) {
         this.addr = addr;
         serializer = serializerManger.getAssociatedInstance(addr.serializerId);
@@ -188,13 +187,13 @@ public final class NioSender implements Sender {
                     if (!tmpCh.close().await(1000)) {
                         LOGGER.warn("Had an issue closing the sender socket.");
                         startCloseThread(tmpCh,
-                                "netty-sender-closer" + threadNum.getAndIncrement() + "-to(" + addr.getGuid() + ") from (" + owner.nodeId + ")");
+                                "nio-sender-closer-" + threadNum.getAndIncrement() + "-to(" + addr.getGuid() + ") from (" + owner.nodeId + ")");
                     }
                 }
             } catch (final Exception e) {
                 LOGGER.warn("Unexpected exception closing sender socket connection", e);
                 startCloseThread(tmpCh,
-                        "netty-sender-closer" + threadNum.getAndIncrement() + "-to(" + addr.getGuid() + ") from (" + owner.nodeId + ")");
+                        "nio-sender-closer-" + threadNum.getAndIncrement() + "-to(" + addr.getGuid() + ") from (" + owner.nodeId + ")");
                 return;
             }
 
@@ -204,8 +203,10 @@ public final class NioSender implements Sender {
     private static void startCloseThread(final Channel tmpCh, final String threadName) {
         // close the damn thing in another thread insistently
         new Thread(() -> {
-            while (tmpCh.isOpen()) {
+            int numTries = 0;
+            while (tmpCh.isOpen() && numTries < 10) {
                 try {
+                    numTries++;
                     if (!tmpCh.close().await(1000))
                         LOGGER.warn("Had an issue closing the sender socket.");
                 } catch (final Exception ee) {

@@ -80,7 +80,7 @@ public class NioSenderFactory implements SenderFactory {
         if (ret == null) {
             synchronized (this) {
                 if (running) {
-                    final TcpAddress tcpaddr = (TcpAddress) destination;
+                    final NioAddress tcpaddr = (NioAddress) destination;
                     ret = new NioSender(tcpaddr, this, statsCollector, serializerManager, group);
                     final NioSender tmp = senders.putIfAbsent(tcpaddr, ret);
                     if (tmp != null) {
@@ -117,8 +117,10 @@ public class NioSenderFactory implements SenderFactory {
         if (tmpGr == null)
             return;
 
-        while (!tmpGr.isShutdown()) {
+        int numTries = 0;
+        while (!tmpGr.isShutdown() && numTries < 10) {
             try {
+                numTries++;
                 if (!tmpGr.shutdownGracefully(0, 0, TimeUnit.MILLISECONDS).await(1000))
                     LOGGER.warn("Couldn't stop netty group for sender. Will try again.");
             } catch (final Exception ee) {

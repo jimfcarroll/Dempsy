@@ -204,8 +204,20 @@ public class LockingContainer extends Container {
     // this is called directly from tests but shouldn't be accessed otherwise.
     @Override
     public void dispatch(final KeyedMessage message, final boolean block) throws IllegalArgumentException, ContainerException {
+        if (!isRunningLazy) {
+            LOGGER.debug("Dispacth called on stopped container");
+            statCollector.messageFailed(false);
+        }
+
         if (message == null)
             return; // No. We didn't process the null message
+
+        if (!inbound.doesMessageKeyBelongToNode(message.key)) {
+            if (LOGGER.isDebugEnabled())
+                LOGGER.debug("Message with key " + SafeString.objectDescription(message.key) + " sent to wrong container. ");
+            statCollector.messageFailed(false);
+            return;
+        }
 
         boolean evictedAndBlocking;
 
@@ -322,6 +334,8 @@ public class LockingContainer extends Container {
                             // even if passivate throws an exception, if the eviction check returned 'true' then
                             // we need to remove the instance.
                             if (removeInstance) {
+                                if (LOGGER.isTraceEnabled())
+                                    LOGGER.trace("Evicting Mp with key " + SafeString.objectDescription(key) + " from " + clusterId.toString());
                                 instances.remove(key);
                                 statCollector.messageProcessorDeleted(key);
                             }
@@ -592,7 +606,8 @@ public class LockingContainer extends Container {
                 try {
                     dispatcher.dispatch(result);
                 } catch (final Exception de) {
-                    LOGGER.warn("Failed on subsequent dispatch of " + result + ": " + de.getLocalizedMessage());
+                    if (isRunning.get())
+                        LOGGER.warn("Failed on subsequent dispatch of " + result + ": " + de.getLocalizedMessage());
                 }
             }
         }

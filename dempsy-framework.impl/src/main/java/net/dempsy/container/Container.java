@@ -50,6 +50,7 @@ public abstract class Container implements Service, KeyspaceChangeListener {
     protected final Logger LOGGER;
 
     protected Dispatcher dispatcher;
+    protected Inbound inbound;
 
     // The ClusterId is set for the sake of error messages.
     protected ClusterId clusterId;
@@ -57,6 +58,7 @@ public abstract class Container implements Service, KeyspaceChangeListener {
     protected long evictionCycleTime = -1;
     protected TimeUnit evictionTimeUnit = null;
     protected final AtomicBoolean isRunning = new AtomicBoolean(false);
+    protected boolean isRunningLazy = false;
 
     protected MessageProcessorLifecycle<Object> prototype;
     protected ClusterStatsCollector statCollector;
@@ -80,6 +82,11 @@ public abstract class Container implements Service, KeyspaceChangeListener {
 
     public Dispatcher getDispatcher() {
         return dispatcher;
+    }
+
+    public Container setInbound(final Inbound inbound) {
+        this.inbound = inbound;
+        return this;
     }
 
     @SuppressWarnings("unchecked")
@@ -140,10 +147,12 @@ public abstract class Container implements Service, KeyspaceChangeListener {
         setOutputCycleConcurrency(-1);
 
         isRunning.set(false);
+        isRunningLazy = false;
     }
 
     @Override
     public void start(final Infrastructure infra) {
+        isRunningLazy = true;
         isRunning.set(true);
 
         statCollector = infra.getClusterStatsCollector(clusterId);
@@ -273,28 +282,33 @@ public abstract class Container implements Service, KeyspaceChangeListener {
                 keyspaceChangeSwitch.workerRunning();
 
                 if (shrink) {
-                    // First do the contract by evicting all
-                    doevict(new EvictCheck() {
-                        // we shouldEvict if the message key no longer belongs as
-                        // part of this container.
-                        // strategyInbound can't be null if we're here since this was invoked
-                        // indirectly from it. So here we don't need to check for null.
-                        @Override
-                        public boolean shouldEvict(final Object key, final Object instance) {
-                            return !inbound.doesMessageKeyBelongToNode(key);
-                        }
+                    LOGGER.trace("Evicting Mps due to keyspace shrinkage.");
+                    try {
+                        // First do the contract by evicting all
+                        doevict(new EvictCheck() {
+                            // we shouldEvict if the message key no longer belongs as
+                            // part of this container.
+                            // strategyInbound can't be null if we're here since this was invoked
+                            // indirectly from it. So here we don't need to check for null.
+                            @Override
+                            public boolean shouldEvict(final Object key, final Object instance) {
+                                return !inbound.doesMessageKeyBelongToNode(key);
+                            }
 
-                        // In this case, it's evictable.
-                        @Override
-                        public boolean isGenerallyEvitable() {
-                            return true;
-                        }
+                            // In this case, it's evictable.
+                            @Override
+                            public boolean isGenerallyEvitable() {
+                                return true;
+                            }
 
-                        @Override
-                        public boolean shouldStopEvicting() {
-                            return keyspaceChangeSwitch.wasPreempted();
-                        }
-                    });
+                            @Override
+                            public boolean shouldStopEvicting() {
+                                return keyspaceChangeSwitch.wasPreempted();
+                            }
+                        });
+                    } catch (final RuntimeException rte) {
+                        LOGGER.error("Failed on eviction", rte);
+                    }
                 }
 
                 if (grow) {
@@ -313,7 +327,8 @@ public abstract class Container implements Service, KeyspaceChangeListener {
 
     private final KeyspaceChanger changer = new KeyspaceChanger();
 
-    public void keyspaceChanged(final boolean less, final boolean more, final Inbound inbound) {
+    @Override
+    public void keyspaceChanged(final boolean less, final boolean more) {
 
         if (less) {
             // we need to run a special eviction pass.
@@ -332,7 +347,7 @@ public abstract class Container implements Service, KeyspaceChangeListener {
                 if (less)
                     changer.shrink = true;
 
-                final Thread t = new Thread(changer, "Keyspace Change Thread");
+                final Thread t = new Thread(changer, clusterId.toString() + "-Keyspace Change Thread");
                 t.setDaemon(true);
                 t.start();
 

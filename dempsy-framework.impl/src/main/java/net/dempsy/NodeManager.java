@@ -153,8 +153,7 @@ public class NodeManager implements Infrastructure, AutoCloseable {
             LOGGER.warn("The node at " + nodeId + " contains no message processors but has a Reciever set. The receiver will never be started.");
 
         threading = tr.track(new DefaultThreadingModel("NodeThreadPool-" + nodeId + "-"))
-                .setCoresFactor(1.0).setAdditionalThreads(1).setHardShutdown(true)
-                .setMaxNumberOfQueuedLimitedTasks(10000).start();
+                .configure(node.getConfiguration()).start();
 
         final NodeReceiver nodeReciever = receiver == null ? null : tr
                 .track(new NodeReceiver(containers.stream().map(pc -> pc.container).collect(Collectors.toList()), threading, nodeStatsCollector));
@@ -215,24 +214,26 @@ public class NodeManager implements Infrastructure, AutoCloseable {
         this.rsManager = tr.start(new RoutingStrategyManager(), this);
 
         // create the router but don't start it yet.
-        this.router = new Router(rsManager, nodeAddress, nodeReciever, tManager, nodeStatsCollector);
+        this.router = new Router(rsManager, nodeAddress, nodeId, nodeReciever, tManager, nodeStatsCollector);
 
         // set up containers
         containers.forEach(pc -> pc.container.setDispatcher(router));
-
-        // start containers
-        containers.forEach(pc -> tr.start(pc.container, this));
-
-        // set up adaptors
-        adaptors.values().forEach(a -> a.setDispatcher(router));
 
         // IB routing strategy
         final int numContainers = containers.size();
         for (int i = 0; i < numContainers; i++) {
             final PerContainer c = containers.get(i);
             c.inboundStrategy.setContainerDetails(c.clusterDefinition.getClusterId(), new ContainerAddress(nodeAddress, i), c.container);
-            tr.start(c.inboundStrategy, this);
         }
+
+        // start containers after setting inbound
+        containers.forEach(pc -> tr.start(pc.container.setInbound(pc.inboundStrategy), this));
+
+        // set up adaptors
+        adaptors.values().forEach(a -> a.setDispatcher(router));
+
+        // start IB routing strategy
+        containers.forEach(pc -> tr.start(pc.inboundStrategy, this));
 
         // start router
         tr.start(this.router, this);
