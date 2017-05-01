@@ -2,7 +2,6 @@ package net.dempsy.transport.tcp.nio;
 
 import java.util.List;
 import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.slf4j.Logger;
@@ -34,7 +33,6 @@ public final class NioSender implements Sender {
     private final static ConcurrentLinkedQueue<MessageBufferOutput> pool = new ConcurrentLinkedQueue<>();
 
     private final static Logger LOGGER = LoggerFactory.getLogger(NettySender.class);
-    private static final AtomicLong threadNum = new AtomicLong(0);
 
     private final NodeStatsCollector statsCollector;
     private final NioAddress addr;
@@ -183,36 +181,16 @@ public final class NioSender implements Sender {
             final Channel tmpCh = ch; // in case close throws.
             ch = null;
             try {
-                if (tmpCh != null) {
-                    if (!tmpCh.close().await(1000)) {
-                        LOGGER.warn("Had an issue closing the sender socket.");
-                        startCloseThread(tmpCh,
-                                "nio-sender-closer-" + threadNum.getAndIncrement() + "-to(" + addr.getGuid() + ") from (" + owner.nodeId + ")");
-                    }
+                synchronized (owner) {
+                    if (tmpCh != null && tmpCh.isOpen() && group.isShutdown() || group.isShuttingDown())
+                        LOGGER.error("Cant close a socket with the group shut down.");
+                    else if (tmpCh != null)
+                        tmpCh.close().sync();
                 }
             } catch (final Exception e) {
                 LOGGER.warn("Unexpected exception closing sender socket connection", e);
-                startCloseThread(tmpCh,
-                        "nio-sender-closer-" + threadNum.getAndIncrement() + "-to(" + addr.getGuid() + ") from (" + owner.nodeId + ")");
-                return;
             }
 
         }
-    }
-
-    private static void startCloseThread(final Channel tmpCh, final String threadName) {
-        // close the damn thing in another thread insistently
-        new Thread(() -> {
-            int numTries = 0;
-            while (tmpCh.isOpen() && numTries < 10) {
-                try {
-                    numTries++;
-                    if (!tmpCh.close().await(1000))
-                        LOGGER.warn("Had an issue closing the sender socket.");
-                } catch (final Exception ee) {
-                    LOGGER.warn("Had an issue closing the sender socket.", ee);
-                }
-            }
-        }, threadName).start();
     }
 }

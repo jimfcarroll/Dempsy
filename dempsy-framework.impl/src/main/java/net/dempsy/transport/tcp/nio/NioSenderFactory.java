@@ -4,7 +4,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadFactory;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
 import org.slf4j.Logger;
@@ -19,7 +18,6 @@ import net.dempsy.serialization.Serializer;
 import net.dempsy.transport.MessageTransportException;
 import net.dempsy.transport.NodeAddress;
 import net.dempsy.transport.SenderFactory;
-import net.dempsy.transport.tcp.TcpAddress;
 
 public class NioSenderFactory implements SenderFactory {
     private final static Logger LOGGER = LoggerFactory.getLogger(NioSenderFactory.class);
@@ -28,7 +26,7 @@ public class NioSenderFactory implements SenderFactory {
     public static final String DEFAULT_SENDER_THREADS = "1";
 
     private final Manager<Serializer> serializerManager = new Manager<Serializer>(Serializer.class);
-    private final ConcurrentHashMap<TcpAddress, NioSender> senders = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<NioAddress, NioSender> senders = new ConcurrentHashMap<>();
 
     private NodeStatsCollector statsCollector;
     private boolean running = true;
@@ -57,10 +55,7 @@ public class NioSenderFactory implements SenderFactory {
         group = null;
         if (tmpGr != null) {
             try {
-                if (!tmpGr.shutdownGracefully(0, 0, TimeUnit.MILLISECONDS).await(1000)) {
-                    LOGGER.warn("Couldn't stop netty group for sender. Will try again.");
-                    startGroupStopThread(tmpGr, "netty-sender-group-closer" + threadNum.getAndIncrement() + ") from (" + nodeId + ")");
-                }
+                tmpGr.shutdownNow();
             } catch (final Exception e) {
                 LOGGER.warn("Unexpected exception shutting down netty group", e);
                 startGroupStopThread(tmpGr, "netty-sender-group-closer" + threadNum.getAndIncrement() + ") from (" + nodeId + ")");
@@ -76,17 +71,12 @@ public class NioSenderFactory implements SenderFactory {
 
     @Override
     public NioSender getSender(final NodeAddress destination) throws MessageTransportException {
-        NioSender ret = senders.get(destination);
+        final NioSender ret = senders.get(destination);
         if (ret == null) {
             synchronized (this) {
                 if (running) {
                     final NioAddress tcpaddr = (NioAddress) destination;
-                    ret = new NioSender(tcpaddr, this, statsCollector, serializerManager, group);
-                    final NioSender tmp = senders.putIfAbsent(tcpaddr, ret);
-                    if (tmp != null) {
-                        ret.stop();
-                        ret = tmp;
-                    }
+                    return senders.computeIfAbsent(tcpaddr, a -> new NioSender(a, this, statsCollector, serializerManager, group));
                 } else {
                     throw new IllegalStateException(NioSender.class.getSimpleName() + " is stopped.");
                 }
@@ -109,10 +99,11 @@ public class NioSenderFactory implements SenderFactory {
                 (ThreadFactory) r -> new Thread(r, "netty-sender-" + threadNum.getAndIncrement() + " from (" + nodeId + ")"));
     }
 
-    void imDone(final TcpAddress tcp) {
+    void imDone(final NioAddress tcp) {
         senders.remove(tcp);
     }
 
+    @SuppressWarnings("deprecation")
     private static void persistentStopGroup(final EventLoopGroup tmpGr) {
         if (tmpGr == null)
             return;
@@ -121,8 +112,7 @@ public class NioSenderFactory implements SenderFactory {
         while (!tmpGr.isShutdown() && numTries < 10) {
             try {
                 numTries++;
-                if (!tmpGr.shutdownGracefully(0, 0, TimeUnit.MILLISECONDS).await(1000))
-                    LOGGER.warn("Couldn't stop netty group for sender. Will try again.");
+                tmpGr.shutdownNow();
             } catch (final Exception ee) {
                 LOGGER.warn("Unexpected exception shutting down netty group", ee);
             }
