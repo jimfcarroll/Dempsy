@@ -26,7 +26,7 @@ public final class NioSender implements Sender {
 
     private final boolean isRunning = true;
     private final boolean blocking;
-    final BlockingQueue<Object> queue;
+    final BlockingQueue<Object> queue = ;
 
     NioSender(final NioAddress addr, final NioSenderFactory parent, final NodeStatsCollector statsCollector,
             final Manager<Serializer> serializerManger, final boolean blocking) {
