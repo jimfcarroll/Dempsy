@@ -13,7 +13,6 @@ import java.nio.channels.Selector;
 import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
 import java.util.Iterator;
-import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
@@ -30,8 +29,8 @@ import net.dempsy.transport.RoutedMessage;
 import net.dempsy.transport.tcp.AbstractTcpReceiver;
 import net.dempsy.transport.tcp.TcpAddress;
 import net.dempsy.transport.tcp.TcpUtils;
+import net.dempsy.transport.tcp.nio.NioUtils.ReturnableBufferOutput;
 import net.dempsy.util.io.MessageBufferInput;
-import net.dempsy.util.io.MessageBufferOutput;
 
 public class NioReceiver<T> extends AbstractTcpReceiver<NioAddress, NioReceiver<T>> {
     private static Logger LOGGER = LoggerFactory.getLogger(NioReceiver.class);
@@ -228,55 +227,6 @@ public class NioReceiver<T> extends AbstractTcpReceiver<NioAddress, NioReceiver<
     // =============================================================================
 
     // =============================================================================
-    // These classes manage the buffer pool used by the readers and clients
-    // =============================================================================
-    private static ConcurrentLinkedQueue<ReturnableBufferOutput> bufferPool = new ConcurrentLinkedQueue<>();
-
-    private static ReturnableBufferOutput get() {
-        ReturnableBufferOutput ret = bufferPool.poll();
-        if (ret == null)
-            ret = new ReturnableBufferOutput();
-        return ret;
-    }
-
-    private static class ReturnableBufferOutput extends MessageBufferOutput {
-        private ByteBuffer bb;
-        private int messageStart = -1;
-
-        private ReturnableBufferOutput() {
-            super(2048); /// holds at least one full packet
-            bb = ByteBuffer.wrap(getBuffer());
-        }
-
-        @Override
-        public void close() {
-            super.close();
-            reset();
-            messageStart = -1;
-            bb.clear();
-            bufferPool.offer(this);
-        }
-
-        @Override
-        public void grow() {
-            super.grow();
-            final ByteBuffer obb = bb;
-            bb = ByteBuffer.wrap(getBuffer());
-            bb.position(obb.position());
-            bb.limit(obb.limit());
-        }
-
-        @Override
-        public void grow(final int newcap) {
-            super.grow(newcap);
-            final ByteBuffer obb = bb;
-            bb = ByteBuffer.wrap(getBuffer());
-            bb.position(obb.position());
-            bb.limit(obb.limit());
-        }
-    }
-
-    // =============================================================================
     // A Client instance is attached to each socket in the selector's register
     // =============================================================================
     private static class Client<T> {
@@ -351,7 +301,7 @@ public class NioReceiver<T> extends AbstractTcpReceiver<NioAddress, NioReceiver<
             final SocketChannel channel = (SocketChannel) key.channel();
             final ReturnableBufferOutput buf;
             if (partialRead == null) {
-                buf = get();
+                buf = NioUtils.get();
                 buf.bb.limit(2); // set it to read the short for size initially
                 partialRead = buf; // set the partialRead. We'll unset this when we pass it on
             } else
