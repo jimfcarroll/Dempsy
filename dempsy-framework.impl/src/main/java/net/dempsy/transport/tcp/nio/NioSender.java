@@ -1,26 +1,11 @@
 package net.dempsy.transport.tcp.nio;
 
-import java.util.List;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.atomic.AtomicReference;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import io.netty.bootstrap.Bootstrap;
-import io.netty.buffer.ByteBuf;
-import io.netty.buffer.ByteBufAllocator;
-import io.netty.buffer.Unpooled;
-import io.netty.buffer.UnpooledHeapByteBuf;
-import io.netty.channel.Channel;
-import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelInitializer;
-import io.netty.channel.ChannelPipeline;
-import io.netty.channel.EventLoopGroup;
-import io.netty.channel.socket.SocketChannel;
-import io.netty.channel.socket.nio.NioSocketChannel;
-import io.netty.handler.codec.MessageToMessageEncoder;
-import net.dempsy.DempsyException;
 import net.dempsy.Manager;
 import net.dempsy.monitoring.NodeStatsCollector;
 import net.dempsy.serialization.Serializer;
@@ -38,159 +23,29 @@ public final class NioSender implements Sender {
     private final NioAddress addr;
     private final Serializer serializer;
     private final NioSenderFactory owner;
-    private final AtomicReference<Internal> connection = new AtomicReference<>(null);
-    private final EventLoopGroup group;
 
-    private boolean isRunning = true;
+    private final boolean isRunning = true;
+    private final boolean blocking;
+    final BlockingQueue<Object> queue;
 
     NioSender(final NioAddress addr, final NioSenderFactory parent, final NodeStatsCollector statsCollector,
-            final Manager<Serializer> serializerManger, final EventLoopGroup group) {
+            final Manager<Serializer> serializerManger, final boolean blocking) {
         this.addr = addr;
         serializer = serializerManger.getAssociatedInstance(addr.serializerId);
         this.statsCollector = statsCollector;
         this.owner = parent;
-        this.group = group;
-        reset();
+        this.blocking = blocking;
+        this.queue = queue;
     }
 
     @Override
     public void send(final Object message) throws MessageTransportException {
-        final Internal cur = connection.get();
-        if (cur != null) {
-            connection.get().ch.writeAndFlush(message);
-        }
+        // TODO: something
     }
 
     @Override
     public synchronized void stop() {
-        isRunning = false;
-        reset();
-        owner.imDone(addr);
+        // TODO: something
     }
 
-    private void reset() {
-        final Internal previous = connection.getAndSet(isRunning ? new Internal() : null);
-
-        if (previous != null)
-            previous.stop();
-    }
-
-    private MessageBufferOutput getPooled() {
-        final MessageBufferOutput tmp = pool.poll();
-        if (tmp != null) {
-            tmp.reset();
-            return tmp;
-        } else {
-            return new MessageBufferOutput();
-        }
-
-    }
-
-    private static class MyByteBuf extends UnpooledHeapByteBuf {
-        final MessageBufferOutput toRelease;
-
-        MyByteBuf(final ByteBufAllocator alloc, final MessageBufferOutput mbo) {
-            super(alloc, mbo.getBuffer(), mbo.getBuffer().length);
-            this.toRelease = mbo;
-            writerIndex(mbo.getPosition());
-        }
-
-        @Override
-        protected void deallocate() {
-            // hook me.
-            super.deallocate();
-            pool.offer(toRelease);
-        }
-    }
-
-    private class Internal {
-        Channel ch = null;
-
-        Internal() {
-            reset();
-        }
-
-        synchronized void reset() {
-            try {
-                final Bootstrap b = new Bootstrap();
-                b.group(group)
-                        .channel(NioSocketChannel.class)
-                        // .option(ChannelOption.ALLOCATOR, new PooledByteBufAllocator(false))
-                        .handler(new ChannelInitializer<SocketChannel>() {
-
-                            @Override
-                            protected void initChannel(final SocketChannel ch) throws Exception {
-                                final ChannelPipeline pipeline = ch.pipeline();
-                                pipeline.addLast(new MessageToMessageEncoder<Object>() {
-
-                                    @Override
-                                    protected void encode(final ChannelHandlerContext ctx, final Object msg, final List<Object> out)
-                                            throws Exception {
-
-                                        final MessageBufferOutput o = getPooled();
-                                        serializer.serialize(msg, o);
-                                        ByteBuf preamble;
-                                        if (o.getPosition() > Short.MAX_VALUE) {
-                                            try (final MessageBufferOutput preamblembo = new MessageBufferOutput(6);) {
-                                                preamblembo.writeShort((short) -1);
-                                                preamblembo.writeInt(o.getPosition());
-                                                preamble = Unpooled.wrappedBuffer(preamblembo.getBuffer());
-                                            }
-                                        } else {
-                                            try (final MessageBufferOutput preamblembo = new MessageBufferOutput(2);) {
-                                                preamblembo.writeShort((short) o.getPosition());
-                                                preamble = Unpooled.wrappedBuffer(preamblembo.getBuffer());
-                                            }
-                                        }
-                                        out.add(preamble);
-                                        out.add(new MyByteBuf(ctx.alloc(), o));
-
-                                        if (statsCollector != null)
-                                            statsCollector.messageSent(msg);
-                                    }
-
-                                    @Override
-                                    public void exceptionCaught(final ChannelHandlerContext ctx, final Throwable cause) throws Exception {
-                                        LOGGER.error("Failed writing to {}", addr, cause);
-                                        // TODO: pass the failed message over for another try.
-                                        NioSender.this.reset();
-                                    }
-                                });
-                            }
-                        });
-
-                // Start the connection attempt.
-                ch = b.connect(addr.inetAddress, addr.port).sync().channel();
-
-            } catch (final InterruptedException ie) {
-                throw new DempsyException(ie);
-            } catch (final Exception ioe) { // Netty can throw an IOException here, but it uses UNSAFE to do it
-                                            // so we can't catch it because the 'connect' doesn't declare that
-                                            // it throws it. Stupid f-tards!
-                if (RuntimeException.class.isAssignableFrom(ioe.getClass())) {
-                    throw (RuntimeException) ioe;
-                } else {
-                    LOGGER.warn("Unexpected and undeclared Netty excpetion {}", ioe.getLocalizedMessage());
-                    throw new DempsyException(ioe);
-                }
-            }
-        }
-
-        // REALLY REALLY STOP!
-        synchronized void stop() {
-            final Channel tmpCh = ch; // in case close throws.
-            ch = null;
-            try {
-                synchronized (owner) {
-                    if (tmpCh != null && tmpCh.isOpen() && group.isShutdown() || group.isShuttingDown())
-                        LOGGER.error("Cant close a socket with the group shut down.");
-                    else if (tmpCh != null)
-                        tmpCh.close().sync();
-                }
-            } catch (final Exception e) {
-                LOGGER.warn("Unexpected exception closing sender socket connection", e);
-            }
-
-        }
-    }
 }

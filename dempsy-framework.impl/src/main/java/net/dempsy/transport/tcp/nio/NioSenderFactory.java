@@ -2,15 +2,16 @@ package net.dempsy.transport.tcp.nio;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import io.netty.channel.EventLoopGroup;
-import io.netty.channel.nio.NioEventLoopGroup;
 import net.dempsy.Infrastructure;
 import net.dempsy.Manager;
 import net.dempsy.monitoring.NodeStatsCollector;
@@ -22,17 +23,26 @@ import net.dempsy.transport.SenderFactory;
 public class NioSenderFactory implements SenderFactory {
     private final static Logger LOGGER = LoggerFactory.getLogger(NioSenderFactory.class);
 
-    public static final String CONFIG_KEY_SENDER_THREADS = "num_sender_threads";
+    public static final String CONFIG_KEY_SENDER_THREADS = "send_threads";
     public static final String DEFAULT_SENDER_THREADS = "1";
+
+    public static final String CONFIG_KEY_SENDER_BLOCKING = "send_blocking";
+    public static final String DEFAULT_SENDER_BLOCKING = "true";
+
+    public static final String CONFIG_KEY_SENDER_MAX_QUEUED = "send_max_queued";
+    public static final String DEFAULT_SENDER_MAX_QUEUED = "1000";
 
     private final Manager<Serializer> serializerManager = new Manager<Serializer>(Serializer.class);
     private final ConcurrentHashMap<NioAddress, NioSender> senders = new ConcurrentHashMap<>();
 
     private NodeStatsCollector statsCollector;
     private boolean running = true;
-    private EventLoopGroup group = null;
 
     String nodeId;
+
+    BlockingQueue<NioSender> queue;
+    int maxNumberOfQueuedOutgoing;
+    boolean blocking;
 
     @Override
     public void close() {
@@ -51,17 +61,28 @@ public class NioSenderFactory implements SenderFactory {
         if (recurse)
             close();
 
-        final EventLoopGroup tmpGr = group;
-        group = null;
-        if (tmpGr != null) {
-            try {
-                tmpGr.shutdownNow();
-            } catch (final Exception e) {
-                LOGGER.warn("Unexpected exception shutting down netty group", e);
-                startGroupStopThread(tmpGr, "netty-sender-group-closer" + threadNum.getAndIncrement() + ") from (" + nodeId + ")");
-            }
+    }
+
+    public static class Sender implements Runnable {
+        final AtomicBoolean isRunning;
+        final boolean batch;
+        final BlockingQueue<NioSender> queue;
+
+        Sender(final BlockingQueue<NioSender> queue, final AtomicBoolean isRunning, final boolean batch) {
+            this.batch = batch;
+            this.isRunning = isRunning;
+            this.queue = queue;
         }
 
+        @Override
+        public void run() {
+            while (isRunning.get()) {
+                try {
+                    final NioSender sender  = batch ? queue.poll() : queue.take();
+                    sender.queue
+                }
+            }
+        }
     }
 
     @Override
@@ -76,7 +97,7 @@ public class NioSenderFactory implements SenderFactory {
             synchronized (this) {
                 if (running) {
                     final NioAddress tcpaddr = (NioAddress) destination;
-                    return senders.computeIfAbsent(tcpaddr, a -> new NioSender(a, this, statsCollector, serializerManager, group));
+                    return senders.computeIfAbsent(tcpaddr, a -> new NioSender(a, this, statsCollector, serializerManager, blocking, queue));
                 } else {
                     throw new IllegalStateException(NioSender.class.getSimpleName() + " is stopped.");
                 }
@@ -95,34 +116,15 @@ public class NioSenderFactory implements SenderFactory {
         final int numSenderThreads = Integer
                 .parseInt(infra.getConfigValue(NioSender.class, CONFIG_KEY_SENDER_THREADS, DEFAULT_SENDER_THREADS));
 
-        this.group = new NioEventLoopGroup(numSenderThreads,
-                (ThreadFactory) r -> new Thread(r, "netty-sender-" + threadNum.getAndIncrement() + " from (" + nodeId + ")"));
+        maxNumberOfQueuedOutgoing = Integer.parseInt(infra.getConfigValue(NioSender.class, CONFIG_KEY_SENDER_MAX_QUEUED, DEFAULT_SENDER_MAX_QUEUED));
+
+        blocking = Boolean.parseBoolean(infra.getConfigValue(NioSender.class, CONFIG_KEY_SENDER_BLOCKING, DEFAULT_SENDER_BLOCKING));
+
+        this.queue = blocking ? new ArrayBlockingQueue<>(maxNumberOfQueuedOutgoing) : new LinkedBlockingQueue<>();
     }
 
     void imDone(final NioAddress tcp) {
         senders.remove(tcp);
     }
 
-    @SuppressWarnings("deprecation")
-    private static void persistentStopGroup(final EventLoopGroup tmpGr) {
-        if (tmpGr == null)
-            return;
-
-        int numTries = 0;
-        while (!tmpGr.isShutdown() && numTries < 10) {
-            try {
-                numTries++;
-                tmpGr.shutdownNow();
-            } catch (final Exception ee) {
-                LOGGER.warn("Unexpected exception shutting down netty group", ee);
-            }
-        }
-    }
-
-    private static void startGroupStopThread(final EventLoopGroup tmpGr, final String threadName) {
-        // close the damn thing in another thread insistently
-        new Thread(() -> {
-            persistentStopGroup(tmpGr);
-        }, threadName).start();
-    }
 }
