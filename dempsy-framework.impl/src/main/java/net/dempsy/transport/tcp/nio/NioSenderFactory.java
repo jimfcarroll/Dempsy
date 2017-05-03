@@ -166,7 +166,10 @@ public class NioSenderFactory implements SenderFactory {
         ToWrite write(final SocketChannel channel, final NodeStatsCollector statsCollector) throws IOException {
             final ByteBuffer cbb = ob.getBb();
             final int numBytes = channel.write(cbb);
-            System.out.println("2) Sent " + numBytes);
+            if (numBytes == 0) {
+                System.out.println("Yo");
+            }
+            LOGGER.trace("Sent " + numBytes);
 
             if (cbb.remaining() == 0) {
                 // it's finished.
@@ -277,6 +280,8 @@ public class NioSenderFactory implements SenderFactory {
                     while (keys.hasNext()) {
                         final SelectionKey key = keys.next();
 
+                        keys.remove();
+
                         if (!key.isValid())
                             continue;
 
@@ -316,36 +321,36 @@ public class NioSenderFactory implements SenderFactory {
     }
 
     private static void serialize(final Serializer ser, final Object obj, final ReturnableBufferOutput ob) throws IOException {
-        final int pos1 = ob.getPosition();
-        ob.setPosition(pos1 + 4);
-        final int pos2 = ob.getPosition();
-        ser.serialize(obj, ob);
-        final int pos3 = ob.getPosition();
-        ob.numMessages++;
-        final int size = ob.getPosition() - pos2;
-        ob.setPosition(pos1);
-        ob.writeInt(size);
-        ob.setPosition(pos3);
-
-        // // we're going to assume the object's size will fit in a short.
-        // ob.writeShort((short) -1); // put a blank and push the buffer position ahead 2 bytes.
-        // final int pos = ob.getPosition(); // pos is the position AFTER the short was written
+        // final int pos1 = ob.getPosition();
+        // ob.setPosition(pos1 + 4);
+        // final int pos2 = ob.getPosition();
         // ser.serialize(obj, ob);
+        // final int pos3 = ob.getPosition();
         // ob.numMessages++;
-        // final int size = ob.getPosition() - pos;
-        // if (size > Short.MAX_VALUE) { // we need to cram an int in after the short.
-        // // make sure the buffer is big enough
-        // ob.writeInt(-1); // push 4 more bytes in.
-        // final byte[] buf = ob.getBuffer();
-        // System.arraycopy(buf, pos, buf, pos + 4, size); // slide the message right 4 bytes
-        // ob.setPosition(pos);
+        // final int size = ob.getPosition() - pos2;
+        // ob.setPosition(pos1);
         // ob.writeInt(size);
-        // ob.setPosition(ob.getPosition() + size);
-        // } else { // we need to write the short at the original position
-        // ob.setPosition(pos - 2);
-        // ob.writeShort((short) size);
-        // ob.setPosition(ob.getPosition() + size);
-        // }
+        // ob.setPosition(pos3);
+
+        // we're going to assume the object's size will fit in a short.
+        ob.writeShort((short) -1); // put a blank and push the buffer position ahead 2 bytes.
+        final int pos = ob.getPosition(); // pos is the position AFTER the short was written
+        ser.serialize(obj, ob);
+        ob.numMessages++;
+        final int size = ob.getPosition() - pos;
+        if (size > Short.MAX_VALUE) { // we need to cram an int in after the short.
+            // make sure the buffer is big enough
+            ob.writeInt(-1); // push 4 more bytes in.
+            final byte[] buf = ob.getBuffer();
+            System.arraycopy(buf, pos, buf, pos + 4, size); // slide the message right 4 bytes
+            ob.setPosition(pos);
+            ob.writeInt(size);
+            ob.setPosition(ob.getPosition() + size);
+        } else { // we need to write the short at the original position
+            ob.setPosition(pos - 2);
+            ob.writeShort((short) size);
+            ob.setPosition(ob.getPosition() + size);
+        }
     }
 
     private static ToWrite serialize(final boolean returnValue, final ToSerialize toSerialize, final NodeStatsCollector statsCollector)

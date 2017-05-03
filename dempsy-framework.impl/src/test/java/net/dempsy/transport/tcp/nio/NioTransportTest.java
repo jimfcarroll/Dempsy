@@ -149,7 +149,7 @@ public class NioTransportTest {
         final AtomicBoolean resolverCalled = new AtomicBoolean(false);
         try (final ServiceTracker tr = new ServiceTracker();) {
             final NioReceiver<RoutedMessage> r = tr.track(new NioReceiver<RoutedMessage>(serializer))
-                    .setNumHandlers(2)
+                    .setNumHandlers(5)
                     .setResolver(a -> {
                         resolverCalled.set(true);
                         return a;
@@ -173,7 +173,7 @@ public class NioTransportTest {
                         @Override
                         public Map<String, String> getConfiguration() {
                             final Map<String, String> ret = new HashMap<>();
-                            ret.put(sf.getClass().getPackage().getName() + "." + NioSenderFactory.CONFIG_KEY_SENDER_THREADS, "1");
+                            ret.put(sf.getClass().getPackage().getName() + "." + NioSenderFactory.CONFIG_KEY_SENDER_THREADS, "5");
                             return ret;
                         }
                     });
@@ -185,6 +185,7 @@ public class NioTransportTest {
 
                     // we need to keep the sender factory going until all messages were accounted for
 
+                    System.out.println("Done!");
                     try {
                         waitToExit.await();
                     } catch (final InterruptedException ie) {}
@@ -198,17 +199,23 @@ public class NioTransportTest {
             // here's we go.
             letMeGo.set(true);
 
+            // the total number of messages sent should be this count.
+            assertTrue(poll(new Long((long) numThreads * (long) numMessagePerThread), v -> {
+                System.out.println(v.toString() + " == " + msgCount);
+                try {
+                    Thread.sleep(1000);
+                } catch (final InterruptedException e) {
+                    // TODO Auto-generated catch block
+                    e.printStackTrace();
+                }
+                return v.longValue() == msgCount.get();
+            }));
+
             // let the threads exit
             waitToExit.countDown();
 
             // all threads should eventually exit.
             assertTrue(poll(threads, o -> o.stream().filter(t -> t.isAlive()).count() == 0));
-
-            // the total number of messages sent should be this count.
-            assertTrue(poll(new Long((long) numThreads * (long) numMessagePerThread), v -> {
-                // System.out.println(v.toString() + " == " + msgCount);
-                return v.longValue() == msgCount.get();
-            }));
 
         }
     }
