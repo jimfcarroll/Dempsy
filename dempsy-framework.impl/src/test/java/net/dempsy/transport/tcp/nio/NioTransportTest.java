@@ -36,6 +36,7 @@ import net.dempsy.transport.RoutedMessage;
 import net.dempsy.transport.Sender;
 import net.dempsy.transport.SenderFactory;
 import net.dempsy.transport.tcp.TcpAddress;
+import net.dempsy.transport.tcp.netty.NettySenderFactory;
 import net.dempsy.util.TestInfrastructure;
 
 @RunWith(Parameterized.class)
@@ -52,7 +53,7 @@ public class NioTransportTest {
     public static Collection<Object[]> combos() {
         return Arrays.asList(new Object[][] {
                 { "nio", (Supplier<SenderFactory>) () -> new NioSenderFactory() },
-                // { "netty", (Supplier<SenderFactory>) () -> new NettySenderFactory() },
+                { "netty", (Supplier<SenderFactory>) () -> new NettySenderFactory() },
         });
     }
 
@@ -173,6 +174,7 @@ public class NioTransportTest {
                         public Map<String, String> getConfiguration() {
                             final Map<String, String> ret = new HashMap<>();
                             ret.put(sf.getClass().getPackage().getName() + "." + NioSenderFactory.CONFIG_KEY_SENDER_THREADS, "5");
+                            ret.put(sf.getClass().getPackage().getName() + "." + NettySenderFactory.CONFIG_KEY_SENDER_THREADS, "2");
                             return ret;
                         }
                     });
@@ -224,8 +226,10 @@ public class NioTransportTest {
         runMultiMessage(10, 10000, "Hello", new KryoSerializer());
     }
 
+    AtomicLong messageNum = new AtomicLong();
+
     @Test
     public void testMultiHugeMessage() throws Exception {
-        runMultiMessage(5, 100, TestWordCount.readBible(), new JsonSerializer());
+        runMultiMessage(5, 100, "" + messageNum.incrementAndGet() + TestWordCount.readBible() + messageNum.incrementAndGet(), new JsonSerializer());
     }
 }

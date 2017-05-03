@@ -77,7 +77,7 @@ public class NettyReceiver<T> extends AbstractTcpReceiver<TcpAddress, NettyRecei
                 final InetSocketAddress inetSocketAddress = doBind(addr, (internalPort < 0) ? 0 : internalPort);
                 internalPort = inetSocketAddress.getPort();
                 final String serId = serializer.getClass().getPackage().getName();
-                internal = new TcpAddress(addr, internalPort, serId);
+                internal = new NettyAddress(addr, internalPort, serId);
                 address = resolver.getExternalAddresses(internal);
             } catch (final IOException e) {
                 throw new DempsyException(e);

@@ -59,6 +59,11 @@ public class NioSenderFactory implements SenderFactory {
 
     Sending[] sendings;
 
+    public void wake() {
+        for (int i = 0; i < sendings.length; i++)
+            sendings[i].selector.wakeup();
+    }
+
     @Override
     public void close() {
         LOGGER.trace(nodeId + " stopping " + NioSenderFactory.class.getSimpleName());
@@ -76,7 +81,6 @@ public class NioSenderFactory implements SenderFactory {
         }
         if (recurse)
             close();
-
     }
 
     @Override
@@ -145,7 +149,10 @@ public class NioSenderFactory implements SenderFactory {
             this.messages = this.sender.sender.messages;
         }
 
-        boolean hasData() {
+        boolean isReadyToSerializeMore() {
+            // if there's already a pile-up then don't bother.
+            if (sender.serializedMessages.peek() != null)
+                return false;
             final Object peek = messages.peek();
             if (peek instanceof StopMessage) {
                 NioUtils.closeQueitly(sender.sender.channel, LOGGER, "Failed to close channel.");
@@ -211,16 +218,21 @@ public class NioSenderFactory implements SenderFactory {
             while (isRunning.get()) {
                 try {
                     // blocking causes attempts to register to block creating a potential deadlock
+                    // final int numSelected = sleep ? selector.select() : selector.selectNow();
                     final int numSelected = selector.selectNow();
 
-                    // manage
+                    // are there any sockets ready to write?
                     if (numSelected == 0) {
+                        // System.out.print("+");
+                        // =====================================================================
                         // nothing ready ... might as well spend some time serializing messages
                         final Set<SelectionKey> keys = selector.keys();
                         if (keys != null && keys.size() > 0) {
                             numNothing = 0; // reset the yield count since we have something to do
-                            serializeNext(false, keys, statsCollector);
-                        } else { // nothing to serialize, do we have any new senders that need handling?
+                            serializeNextAndQueue(keys, statsCollector);
+                        }
+                        // =====================================================================
+                        else { // nothing to serialize, do we have any new senders that need handling?
                             boolean didSomething = false;
                             final Set<NioSender> curSenders = working.keySet();
                             final Set<NioSender> newSenders = new HashSet<>();
@@ -254,7 +266,7 @@ public class NioSenderFactory implements SenderFactory {
                                 }
                             } finally {
                                 // any still on toWork need to be returned to working
-                                newSenders.forEach(s -> working.put(s, s));
+                                newSenders.forEach(s -> working.putIfAbsent(s, s));
                             }
 
                             if (!didSomething) { // if we didn't do anything then sleep/yield based on how long we've been bord.
@@ -270,11 +282,12 @@ public class NioSenderFactory implements SenderFactory {
                                     Thread.yield();
                             } else // otherwise we DID do something
                                 numNothing = 0;
-
-                            continue;
                         }
+                        continue;
                     } else
                         numNothing = 0; // reset the yield count since we have something to do
+
+                    System.out.print("-");
 
                     final Iterator<SelectionKey> keys = selector.selectedKeys().iterator();
                     while (keys.hasNext()) {
@@ -316,8 +329,10 @@ public class NioSenderFactory implements SenderFactory {
         final ReturnableBufferOutput ob = messages.peek() != null ? messages.removeFirst() : null;
         if (ob != null)
             return new ToWrite(ob);
-        else // serialize data
-            return serialize(true, new ToSerialize(sender), statsCollector);
+        else { // serialize data
+            final MutableBoolean didSomething = new MutableBoolean();
+            return serialize(true, new ToSerialize(sender), statsCollector, didSomething);
+        }
     }
 
     private static void serialize(final Serializer ser, final Object obj, final ReturnableBufferOutput ob) throws IOException {
@@ -353,7 +368,12 @@ public class NioSenderFactory implements SenderFactory {
         }
     }
 
-    private static ToWrite serialize(final boolean returnValue, final ToSerialize toSerialize, final NodeStatsCollector statsCollector)
+    private static class MutableBoolean {
+        boolean flag = false;
+    }
+
+    private static ToWrite serialize(final boolean returnValue, final ToSerialize toSerialize, final NodeStatsCollector statsCollector,
+            final MutableBoolean queued)
             throws IOException {
         if (toSerialize != null) {
             final SenderHolder senderHolder = toSerialize.sender;
@@ -368,6 +388,7 @@ public class NioSenderFactory implements SenderFactory {
                         statsCollector.messageNotSent();
                     for (int i = 0; i < ob.numMessages; i++)
                         statsCollector.messageNotSent();
+                    queued.flag = false;
                     return null;
                 }
                 serialize(ser, next, ob);
@@ -375,9 +396,11 @@ public class NioSenderFactory implements SenderFactory {
 
             if (ob.numMessages == 0) {
                 // no messages, we went on one more loop after emptying the queue and there's nothing here so we're going to cleanup.
+                queued.flag = false;
                 return null;
             }
 
+            queued.flag = true;
             // we either return the value or we add it to the
             if (returnValue)
                 return new ToWrite(ob);
@@ -385,18 +408,27 @@ public class NioSenderFactory implements SenderFactory {
                 senderHolder.serializedMessages.add(ob);
 
         }
+        queued.flag = false;
         return null;
     }
 
-    private static ToWrite serializeNext(final boolean returnValue, final Set<SelectionKey> keys, final NodeStatsCollector statsCollector)
+    /**
+     * Given all of the keys, search them for SenderHolders
+     */
+    private static boolean serializeNextAndQueue(final Set<SelectionKey> keys, final NodeStatsCollector statsCollector)
             throws IOException {
         // pick a message to serialize.
         final ToSerialize toSerialize = keys.stream()
                 .map(k -> (SenderHolder) k.attachment())
                 .map(sh -> new ToSerialize(sh))
-                .filter(ts -> ts.hasData())
+                .filter(ts -> ts.isReadyToSerializeMore())
                 .findFirst().orElse(null);
 
-        return serialize(returnValue, toSerialize, statsCollector);
+        if (toSerialize == null)
+            return false;
+
+        final MutableBoolean didSomething = new MutableBoolean();
+        serialize(false, toSerialize, statsCollector, didSomething);
+        return didSomething.flag;
     }
 }

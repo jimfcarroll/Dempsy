@@ -33,7 +33,7 @@ public abstract class DempsyBaseTest {
     * Setting 'hardcore' to true causes EVERY SINGLE IMPLEMENTATION COMBINATION to be used in
     * every runCombos call. This can make tests run for a loooooong time.
     */
-    public static boolean hardcore = true;
+    public static boolean hardcore = false;
 
     protected Logger LOGGER;
 
@@ -102,7 +102,7 @@ public abstract class DempsyBaseTest {
                 new String[] { "simple", "managed" },
                 new String[] { "locking", "nonlocking", "altnonlocking" },
                 new String[] { "local", "zookeeper" },
-                new String[] { "bq", "passthrough", "nio" },
+                new String[] { "bq", "passthrough", "nio", "netty" },
                 new String[] { "json", "java", "kryo" });
     }
 
@@ -110,8 +110,8 @@ public abstract class DempsyBaseTest {
         return new Combos(
                 new String[] { "managed" },
                 new String[] { "altnonlocking" },
-                new String[] { "zookeeper" },
-                new String[] { "nio" },
+                new String[] { "local" },
+                new String[] { "nio", "netty" },
                 new String[] { "kryo" });
 
     }

@@ -5,8 +5,8 @@ import java.net.InetSocketAddress;
 import java.nio.channels.SocketChannel;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.LinkedBlockingQueue;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -44,7 +44,8 @@ public final class NioSender implements Sender {
         this.blocking = parent.blocking;
         this.nodeId = parent.nodeId;
 
-        messages = new LinkedBlockingQueue<>();
+        // messages = new LinkedBlockingQueue<>();
+        messages = new ArrayBlockingQueue<>(2);
 
         try {
             channel = SocketChannel.open();
@@ -55,10 +56,17 @@ public final class NioSender implements Sender {
 
     @Override
     public void send(final Object message) throws MessageTransportException {
-        if (running)
-            messages.offer(message);
-        // while (messages.peek() != null)
-        // Thread.yield();
+        boolean done = false;
+        while (running && !done) {
+            try {
+                if (running) {
+                    messages.put(message);
+                }
+                done = true;
+            } catch (final InterruptedException e) {
+
+            }
+        }
     }
 
     @Override

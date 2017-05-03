@@ -4,7 +4,7 @@ import java.net.InetAddress;
 
 import net.dempsy.transport.NodeAddress;
 
-public class TcpAddress implements NodeAddress {
+public abstract class TcpAddress implements NodeAddress {
 
     private static final long serialVersionUID = 1L;
 

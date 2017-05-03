@@ -2,7 +2,6 @@ package net.dempsy.transport.tcp.netty;
 
 import java.util.List;
 import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.slf4j.Logger;
@@ -34,7 +33,6 @@ public final class NettySender implements Sender {
     private final static ConcurrentLinkedQueue<MessageBufferOutput> pool = new ConcurrentLinkedQueue<>();
 
     private final static Logger LOGGER = LoggerFactory.getLogger(NettySender.class);
-    private static final AtomicLong threadNum = new AtomicLong(0);
 
     private final NodeStatsCollector statsCollector;
     private final TcpAddress addr;
@@ -59,12 +57,14 @@ public final class NettySender implements Sender {
     public void send(final Object message) throws MessageTransportException {
         final Internal cur = connection.get();
         if (cur != null) {
-            try {
-                connection.get().ch.writeAndFlush(message).sync();
-            } catch (final InterruptedException e) {
-                // TODO Auto-generated catch block
-                e.printStackTrace();
-            }
+            // try {
+            // connection.get().ch.writeAndFlush(message).sync();
+            // } catch (final InterruptedException e) {
+            // // TODO Auto-generated catch block
+            // e.printStackTrace();
+            // }
+
+            connection.get().ch.writeAndFlush(message);
         }
     }
 
@@ -187,35 +187,16 @@ public final class NettySender implements Sender {
         synchronized void stop() {
             final Channel tmpCh = ch; // in case close throws.
             ch = null;
-            try {
-                if (tmpCh != null) {
-                    if (!tmpCh.close().await(1000)) {
-                        LOGGER.warn("Had an issue closing the sender socket.");
-                        startCloseThread(tmpCh,
-                                "netty-sender-closer" + threadNum.getAndIncrement() + "-to(" + addr.getGuid() + ") from (" + owner.nodeId + ")");
+            if (tmpCh != null) {
+                while (tmpCh.isOpen()) {
+                    try {
+                        tmpCh.close().sync();
+                    } catch (final Exception e) {
+                        LOGGER.warn("Unexpected exception closing sender socket connection", e);
+                        return;
                     }
                 }
-            } catch (final Exception e) {
-                LOGGER.warn("Unexpected exception closing sender socket connection", e);
-                startCloseThread(tmpCh,
-                        "netty-sender-closer" + threadNum.getAndIncrement() + "-to(" + addr.getGuid() + ") from (" + owner.nodeId + ")");
-                return;
             }
-
         }
-    }
-
-    private static void startCloseThread(final Channel tmpCh, final String threadName) {
-        // close the damn thing in another thread insistently
-        new Thread(() -> {
-            while (tmpCh.isOpen()) {
-                try {
-                    if (!tmpCh.close().await(1000))
-                        LOGGER.warn("Had an issue closing the sender socket.");
-                } catch (final Exception ee) {
-                    LOGGER.warn("Had an issue closing the sender socket.", ee);
-                }
-            }
-        }, threadName).start();
     }
 }
