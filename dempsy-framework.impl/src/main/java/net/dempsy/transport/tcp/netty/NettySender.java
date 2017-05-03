@@ -59,7 +59,7 @@ public final class NettySender implements Sender {
     public void send(final Object message) throws MessageTransportException {
         final Internal cur = connection.get();
         if (cur != null) {
-            connection.get().ch.writeAndFlush(message);
+            connection.get().ch.write(message);
         }
     }
 

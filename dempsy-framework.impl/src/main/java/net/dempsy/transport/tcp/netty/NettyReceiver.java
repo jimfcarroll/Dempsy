@@ -209,18 +209,24 @@ public class NettyReceiver<T> extends AbstractTcpReceiver<TcpAddress, NettyRecei
                 in.readBytes(data);
                 rr.clear();
 
-                final MessageBufferInput mbi = new MessageBufferInput(data);
-                listener.onMessage(() -> {
-                    try {
-                        @SuppressWarnings("unchecked")
-                        final T rm = (T) serializer.deserialize(mbi, RoutedMessage.class);
-                        mbi.close();
-                        return rm;
-                    } catch (final IOException ioe) {
-                        LOGGER.error("Failure on deserialization", ioe);
-                        throw new DempsyException(ioe);
-                    }
-                });
+                try (MessageBufferInput mbi = new MessageBufferInput(data);) {
+                    @SuppressWarnings("unchecked")
+                    final T rm = (T) serializer.deserialize(mbi, RoutedMessage.class);
+                    listener.onMessage(rm); // this should process the message asynchronously
+                }
+
+                // final MessageBufferInput mbi = new MessageBufferInput(data);
+                // listener.onMessage(() -> {
+                // try {
+                // @SuppressWarnings("unchecked")
+                // final T rm = (T) serializer.deserialize(mbi, RoutedMessage.class);
+                // mbi.close();
+                // return rm;
+                // } catch (final IOException ioe) {
+                // LOGGER.error("Failure on deserialization", ioe);
+                // throw new DempsyException(ioe);
+                // }
+                // });
             }
         }
 

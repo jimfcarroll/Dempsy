@@ -10,6 +10,7 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
@@ -51,7 +52,8 @@ public class NioTransportTest {
     @Parameters(name = "{index}: senderfactory={0}")
     public static Collection<Object[]> combos() {
         return Arrays.asList(new Object[][] {
-                { "netty", (Supplier<SenderFactory>) () -> new NettySenderFactory() }
+                // { "nio", (Supplier<SenderFactory>) () -> new NioSenderFactory() },
+                { "netty", (Supplier<SenderFactory>) () -> new NettySenderFactory() },
         });
     }
 
@@ -69,7 +71,6 @@ public class NioTransportTest {
             final TcpAddress addr = r.getAddress();
             LOGGER.debug(addr.toString());
             r.start(null, tr.track(new DefaultThreadingModel(NioTransportTest.class.getSimpleName() + ".testReceiverStart")));
-
             assertTrue(resolverCalled.get());
         }
     }
@@ -164,23 +165,29 @@ public class NioTransportTest {
             }, tr.track(new DefaultThreadingModel(NioTransportTest.class.getSimpleName() + ".testReceiverStart")));
 
             final AtomicBoolean letMeGo = new AtomicBoolean(false);
+            final CountDownLatch waitToExit = new CountDownLatch(1);
+
             final List<Thread> threads = IntStream.range(0, numThreads).mapToObj(threadNum -> new Thread(() -> {
                 try (final SenderFactory sf = senderFactory.get();) {
                     sf.start(new TestInfrastructure(null, null) {
-
                         @Override
                         public Map<String, String> getConfiguration() {
                             final Map<String, String> ret = new HashMap<>();
-                            ret.put(sf.getClass().getPackage().getName() + "." + NettySenderFactory.CONFIG_KEY_SENDER_THREADS, "2");
+                            ret.put(sf.getClass().getPackage().getName() + "." + NioSenderFactory.CONFIG_KEY_SENDER_THREADS, "1");
                             return ret;
                         }
-
                     });
                     final Sender sender = sf.getSender(addr);
                     while (!letMeGo.get())
                         Thread.yield();
                     for (int i = 0; i < numMessagePerThread; i++)
                         sender.send(new RoutedMessage(new int[] { 0 }, "Hello", message));
+
+                    // we need to keep the sender factory going until all messages were accounted for
+
+                    try {
+                        waitToExit.await();
+                    } catch (final InterruptedException ie) {}
 
                 }
             }, "testMultiMessage-Sender-" + threadNum))
@@ -191,11 +198,18 @@ public class NioTransportTest {
             // here's we go.
             letMeGo.set(true);
 
+            // let the threads exit
+            waitToExit.countDown();
+
             // all threads should eventually exit.
             assertTrue(poll(threads, o -> o.stream().filter(t -> t.isAlive()).count() == 0));
 
             // the total number of messages sent should be this count.
-            assertTrue(poll(new Long((long) numThreads * (long) numMessagePerThread), v -> v.longValue() == msgCount.get()));
+            assertTrue(poll(new Long((long) numThreads * (long) numMessagePerThread), v -> {
+                // System.out.println(v.toString() + " == " + msgCount);
+                return v.longValue() == msgCount.get();
+            }));
+
         }
     }
 

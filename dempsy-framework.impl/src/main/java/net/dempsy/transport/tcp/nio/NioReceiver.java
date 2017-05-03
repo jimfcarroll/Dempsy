@@ -251,6 +251,17 @@ public class NioReceiver<T> extends AbstractTcpReceiver<NioAddress, NioReceiver<
         private final int readSize(final SocketChannel channel, final ByteBuffer bb) throws IOException {
             final int size;
 
+            // if (bb.position() < 4) {
+            // bb.limit(4);
+            // if (channel.read(bb) == -1)
+            // return -2;
+            // }
+            //
+            // if (bb.position() >= 4)
+            // size = bb.getInt(0);
+            // else
+            // size = -1;
+
             if (bb.position() < 2) {
                 // read a Short
                 bb.limit(2);
@@ -302,11 +313,11 @@ public class NioReceiver<T> extends AbstractTcpReceiver<NioAddress, NioReceiver<
             final ReturnableBufferOutput buf;
             if (partialRead == null) {
                 buf = NioUtils.get();
-                buf.bb.limit(2); // set it to read the short for size initially
+                buf.getBb().limit(2); // set it to read the short for size initially
                 partialRead = buf; // set the partialRead. We'll unset this when we pass it on
             } else
                 buf = partialRead;
-            ByteBuffer bb = buf.bb;
+            ByteBuffer bb = buf.getBb();
 
             if (bb.limit() <= 6) { // we haven't read the size yet.
                 final int size = readSize(channel, bb);
@@ -329,7 +340,7 @@ public class NioReceiver<T> extends AbstractTcpReceiver<NioAddress, NioReceiver<
                 if (bb.capacity() < limit + size) {
                     // we need to grow the underlying buffer.
                     buf.grow(limit + size);
-                    bb = buf.bb;
+                    bb = buf.getBb();
                 }
 
                 buf.messageStart = bb.position();
@@ -352,7 +363,7 @@ public class NioReceiver<T> extends AbstractTcpReceiver<NioAddress, NioReceiver<
             partialRead = null;
             typedListener.onMessage(() -> {
                 try (final ReturnableBufferOutput mbo = toGo;
-                        final MessageBufferInput mbi = new MessageBufferInput(mbo.getBuffer(), mbo.messageStart, mbo.bb.position());) {
+                        final MessageBufferInput mbi = new MessageBufferInput(mbo.getBuffer(), mbo.messageStart, mbo.getBb().position());) {
                     @SuppressWarnings("unchecked")
                     final T rm = (T) serializer.deserialize(mbi, RoutedMessage.class);
                     return rm;

@@ -3,6 +3,8 @@ package net.dempsy.transport.tcp.nio;
 import java.nio.ByteBuffer;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
+import org.slf4j.Logger;
+
 import net.dempsy.util.io.MessageBufferOutput;
 
 class NioUtils {
@@ -18,18 +20,33 @@ class NioUtils {
         return ret;
     }
 
+    static void closeQueitly(final AutoCloseable ac, final Logger LOGGER, final String failedMessage) {
+        try {
+            ac.close();
+        } catch (final Exception e) {
+            LOGGER.warn(failedMessage, e);
+        }
+    }
+
     static class ReturnableBufferOutput extends MessageBufferOutput {
-        public ByteBuffer bb;
+        private ByteBuffer bb = null;
         public int messageStart = -1;
+        public int numMessages = 0;
 
         private ReturnableBufferOutput() {
             super(2048); /// holds at least one full packet
-            bb = ByteBuffer.wrap(getBuffer());
+        }
+
+        public ByteBuffer getBb() {
+            if (bb == null)
+                bb = ByteBuffer.wrap(getBuffer());
+            return bb;
         }
 
         public void flop() {
-            bb.clear();
-            bb.limit(getPosition());
+            bb = null;
+            final ByteBuffer lbb = getBb();
+            lbb.limit(getPosition());
         }
 
         @Override
@@ -37,26 +54,20 @@ class NioUtils {
             super.close();
             reset();
             messageStart = -1;
+            numMessages = 0;
             bb.clear();
             bufferPool.offer(this);
         }
 
         @Override
-        public void grow() {
-            super.grow();
-            final ByteBuffer obb = bb;
-            bb = ByteBuffer.wrap(getBuffer());
-            bb.position(obb.position());
-            bb.limit(obb.limit());
-        }
-
-        @Override
         public void grow(final int newcap) {
             super.grow(newcap);
-            final ByteBuffer obb = bb;
-            bb = ByteBuffer.wrap(getBuffer());
-            bb.position(obb.position());
-            bb.limit(obb.limit());
+            if (bb != null) {
+                final ByteBuffer obb = bb;
+                bb = ByteBuffer.wrap(getBuffer());
+                bb.position(obb.position());
+                bb.limit(obb.limit());
+            }
         }
     }
 
