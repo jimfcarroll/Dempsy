@@ -57,8 +57,8 @@ public final class NioSender implements Sender {
     public void send(final Object message) throws MessageTransportException {
         if (running)
             messages.offer(message);
-        while (messages.peek() != null)
-            Thread.yield();
+        // while (messages.peek() != null)
+        // Thread.yield();
     }
 
     @Override

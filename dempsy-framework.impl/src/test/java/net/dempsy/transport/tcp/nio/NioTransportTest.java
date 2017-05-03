@@ -36,7 +36,6 @@ import net.dempsy.transport.RoutedMessage;
 import net.dempsy.transport.Sender;
 import net.dempsy.transport.SenderFactory;
 import net.dempsy.transport.tcp.TcpAddress;
-import net.dempsy.transport.tcp.netty.NettySenderFactory;
 import net.dempsy.util.TestInfrastructure;
 
 @RunWith(Parameterized.class)
@@ -52,8 +51,8 @@ public class NioTransportTest {
     @Parameters(name = "{index}: senderfactory={0}")
     public static Collection<Object[]> combos() {
         return Arrays.asList(new Object[][] {
-                // { "nio", (Supplier<SenderFactory>) () -> new NioSenderFactory() },
-                { "netty", (Supplier<SenderFactory>) () -> new NettySenderFactory() },
+                { "nio", (Supplier<SenderFactory>) () -> new NioSenderFactory() },
+                // { "netty", (Supplier<SenderFactory>) () -> new NettySenderFactory() },
         });
     }
 
