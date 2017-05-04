@@ -29,12 +29,12 @@ import net.dempsy.transport.RoutedMessage;
 import net.dempsy.transport.tcp.AbstractTcpReceiver;
 import net.dempsy.transport.tcp.TcpAddress;
 import net.dempsy.transport.tcp.TcpUtils;
-import net.dempsy.transport.tcp.nio.NioUtils.ReturnableBufferOutput;
+import net.dempsy.transport.tcp.nio.internal.NioUtils;
+import net.dempsy.transport.tcp.nio.internal.NioUtils.ReturnableBufferOutput;
 import net.dempsy.util.io.MessageBufferInput;
 
 public class NioReceiver<T> extends AbstractTcpReceiver<NioAddress, NioReceiver<T>> {
     private static Logger LOGGER = LoggerFactory.getLogger(NioReceiver.class);
-    public final static int DEFAULT_MAX_MESSAGE_SIZE_BYTES = 1024 * 1024;
 
     private final AtomicBoolean isRunning = new AtomicBoolean(true);
 
@@ -42,7 +42,6 @@ public class NioReceiver<T> extends AbstractTcpReceiver<NioAddress, NioReceiver<
     private NioAddress address = null;
     private Binding binding = null;
     private Acceptor acceptor = null;
-    private int maxMessageSize = DEFAULT_MAX_MESSAGE_SIZE_BYTES;
 
     @SuppressWarnings("unchecked")
     private Reader<T>[] readers = new Reader[2];
@@ -76,7 +75,7 @@ public class NioReceiver<T> extends AbstractTcpReceiver<NioAddress, NioReceiver<
                 binding = new Binding(addr, internalPort);
                 final InetSocketAddress inetSocketAddress = binding.bound;
                 internalPort = inetSocketAddress.getPort();
-                internal = new NioAddress(addr, internalPort, serId);
+                internal = new NioAddress(addr, internalPort, serId, binding.recvBufferSize);
                 address = resolver.getExternalAddresses(internal);
             } catch (final IOException e) {
                 throw new DempsyException(e);
@@ -111,14 +110,10 @@ public class NioReceiver<T> extends AbstractTcpReceiver<NioAddress, NioReceiver<
         threadingModel.runDaemon(acceptor = new Acceptor(binding, isRunning, readers, address.getGuid()), "nio-acceptor-" + address);
     }
 
+    @Override
     @SuppressWarnings("unchecked")
     public NioReceiver<T> setNumHandlers(final int numHandlers) {
         readers = new Reader[numHandlers];
-        return this;
-    }
-
-    public NioReceiver<T> setMaxMessageSize(final int maxMessageSize) {
-        this.maxMessageSize = maxMessageSize;
         return this;
     }
 
@@ -129,6 +124,7 @@ public class NioReceiver<T> extends AbstractTcpReceiver<NioAddress, NioReceiver<
         public final Selector selector;
         public final ServerSocketChannel serverChannel;
         public final InetSocketAddress bound;
+        public final int recvBufferSize;
 
         public Binding(final InetAddress addr, final int port) throws IOException {
             final int lport = port < 0 ? 0 : port;
@@ -141,6 +137,7 @@ public class NioReceiver<T> extends AbstractTcpReceiver<NioAddress, NioReceiver<
             final ServerSocket sock = serverChannel.socket();
             sock.bind(tobind);
             bound = (InetSocketAddress) sock.getLocalSocketAddress();
+            recvBufferSize = sock.getReceiveBufferSize();
         }
     }
 

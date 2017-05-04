@@ -7,8 +7,11 @@ import net.dempsy.transport.tcp.TcpAddress;
 public class NioAddress extends TcpAddress {
     private static final long serialVersionUID = 1L;
 
-    public NioAddress(final InetAddress inetAddress, final int port, final String serializerId) {
-        super(inetAddress, port, serializerId);
+    public NioAddress(final InetAddress inetAddress, final int port, final String serializerId, final int recvBufferSize) {
+        super(inetAddress, port, serializerId, recvBufferSize);
     }
+
+    @SuppressWarnings("unused")
+    private NioAddress() {}
 
 }

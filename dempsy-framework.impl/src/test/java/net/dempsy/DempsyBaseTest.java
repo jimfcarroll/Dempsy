@@ -110,8 +110,8 @@ public abstract class DempsyBaseTest {
         return new Combos(
                 new String[] { "managed" },
                 new String[] { "altnonlocking" },
-                new String[] { "local" },
-                new String[] { "nio", "netty" },
+                new String[] { "zookeeper" },
+                new String[] { "nio" },
                 new String[] { "kryo" });
 
     }

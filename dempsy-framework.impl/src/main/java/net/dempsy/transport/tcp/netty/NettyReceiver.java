@@ -54,6 +54,7 @@ public class NettyReceiver<T> extends AbstractTcpReceiver<TcpAddress, NettyRecei
         this(serializer, -1);
     }
 
+    @Override
     public NettyReceiver<T> setNumHandlers(final int numHandlers) {
         this.numHandlers = numHandlers;
         return this;
@@ -77,7 +78,7 @@ public class NettyReceiver<T> extends AbstractTcpReceiver<TcpAddress, NettyRecei
                 final InetSocketAddress inetSocketAddress = doBind(addr, (internalPort < 0) ? 0 : internalPort);
                 internalPort = inetSocketAddress.getPort();
                 final String serId = serializer.getClass().getPackage().getName();
-                internal = new NettyAddress(addr, internalPort, serId);
+                internal = new NettyAddress(addr, internalPort, serId, -1);
                 address = resolver.getExternalAddresses(internal);
             } catch (final IOException e) {
                 throw new DempsyException(e);
@@ -129,7 +130,7 @@ public class NettyReceiver<T> extends AbstractTcpReceiver<TcpAddress, NettyRecei
                         // }
                         //
                         // });
-                        ch.pipeline().addLast(new Client<T>(serializer, () -> typedListener));
+                        ch.pipeline().addLast(new Client<T>(serializer, () -> typedListener, maxMessageSize));
                     }
 
                 });
@@ -154,8 +155,10 @@ public class NettyReceiver<T> extends AbstractTcpReceiver<TcpAddress, NettyRecei
     private static class Client<T> extends ByteToMessageDecoder {
         public final Serializer serializer;
         public final Listener<T> listener;
+        public final int maxMessageSize;
 
-        Client(final Serializer serializer, final Supplier<Listener<T>> listener) {
+        Client(final Serializer serializer, final Supplier<Listener<T>> listener, final int maxMessageSize) {
+            this.maxMessageSize = maxMessageSize;
             this.serializer = serializer;
             this.listener = listener.get();
         }
@@ -200,6 +203,15 @@ public class NettyReceiver<T> extends AbstractTcpReceiver<TcpAddress, NettyRecei
                     ReferenceCountUtil.release(in);
                     // assume we have a corrupt channel
                     throw new IOException("Read negative message size. Assuming a corrupt channel.");
+                }
+
+                // if the results are less than zero or WAY to big, we need to assume a corrupt channel.
+                if (size <= 0 || size > maxMessageSize) {
+                    // assume the channel is corrupted and close us out.
+                    LOGGER.warn(" received what appears to be a corrupt message because it's size is " + size);
+                    ReferenceCountUtil.release(in);
+                    // assume we have a corrupt channel
+                    throw new IOException("received final what appears to final be a corrupt final message because it's size is " + size);
                 }
 
                 if (in.readableBytes() < size)

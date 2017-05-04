@@ -1,4 +1,4 @@
-package net.dempsy.transport.tcp.nio;
+package net.dempsy.transport.tcp;
 
 import static net.dempsy.util.Functional.chain;
 import static net.dempsy.utils.test.ConditionPoll.poll;
@@ -32,59 +32,67 @@ import net.dempsy.serialization.jackson.JsonSerializer;
 import net.dempsy.serialization.kryo.KryoSerializer;
 import net.dempsy.threading.DefaultThreadingModel;
 import net.dempsy.transport.Listener;
+import net.dempsy.transport.Receiver;
 import net.dempsy.transport.RoutedMessage;
 import net.dempsy.transport.Sender;
 import net.dempsy.transport.SenderFactory;
-import net.dempsy.transport.tcp.TcpAddress;
+import net.dempsy.transport.tcp.netty.NettyReceiver;
 import net.dempsy.transport.tcp.netty.NettySenderFactory;
+import net.dempsy.transport.tcp.nio.NioReceiver;
+import net.dempsy.transport.tcp.nio.NioSenderFactory;
 import net.dempsy.util.TestInfrastructure;
 
 @RunWith(Parameterized.class)
-public class NioTransportTest {
-    private static final Logger LOGGER = LoggerFactory.getLogger(NioTransportTest.class);
+public class TcpTransportTest {
+    private static final Logger LOGGER = LoggerFactory.getLogger(TcpTransportTest.class);
 
     private final Supplier<SenderFactory> senderFactory;
 
-    public NioTransportTest(final String senderFactoryName, final Supplier<SenderFactory> senderFactory) {
+    private final Supplier<AbstractTcpReceiver<?, ?>> receiver;
+
+    public TcpTransportTest(final String senderFactoryName, final Supplier<SenderFactory> senderFactory, final String receiverName,
+            final Supplier<AbstractTcpReceiver<?, ?>> receiver) {
         this.senderFactory = senderFactory;
+        this.receiver = receiver;
     }
 
-    @Parameters(name = "{index}: senderfactory={0}")
+    @Parameters(name = "{index}: senderfactory={0}, receiver={2}")
     public static Collection<Object[]> combos() {
+        final Supplier<Receiver> nior = () -> new NioReceiver<>(new JsonSerializer());
+        final Supplier<Receiver> nettyr = () -> new NettyReceiver<>(new JsonSerializer());
         return Arrays.asList(new Object[][] {
-                { "nio", (Supplier<SenderFactory>) () -> new NioSenderFactory() },
-                { "netty", (Supplier<SenderFactory>) () -> new NettySenderFactory() },
+                { "nio", (Supplier<SenderFactory>) () -> new NioSenderFactory(), "nio", nior },
+                { "netty", (Supplier<SenderFactory>) () -> new NettySenderFactory(), "netty", nettyr },
+                { "nio", (Supplier<SenderFactory>) () -> new NioSenderFactory(), "netty", nettyr },
+                { "netty", (Supplier<SenderFactory>) () -> new NettySenderFactory(), "nio", nior },
         });
+
     }
 
     @Test
     public void testReceiverStart() throws Exception {
         final AtomicBoolean resolverCalled = new AtomicBoolean(false);
         try (ServiceTracker tr = new ServiceTracker();) {
-            final NioReceiver<RoutedMessage> r = tr.track(new NioReceiver<RoutedMessage>(new JsonSerializer()))
-                    .setNumHandlers(2)
+            final AbstractTcpReceiver<?, ?> r = tr.track(receiver.get())
                     .setResolver(a -> {
                         resolverCalled.set(true);
                         return a;
-                    }).setUseLocalHost(true);
+                    }).setNumHandlers(2)
+                    .setUseLocalHost(true);
 
             final TcpAddress addr = r.getAddress();
             LOGGER.debug(addr.toString());
-            r.start(null, tr.track(new DefaultThreadingModel(NioTransportTest.class.getSimpleName() + ".testReceiverStart")));
+            r.start(null, tr.track(new DefaultThreadingModel(TcpTransportTest.class.getSimpleName() + ".testReceiverStart")));
             assertTrue(resolverCalled.get());
         }
     }
 
     @Test
     public void testMessage() throws Exception {
-        final AtomicBoolean resolverCalled = new AtomicBoolean(false);
         try (ServiceTracker tr = new ServiceTracker();) {
-            final NioReceiver<RoutedMessage> r = tr.track(new NioReceiver<RoutedMessage>(new KryoSerializer()))
+            final AbstractTcpReceiver<?, ?> r = tr.track(receiver.get())
                     .setNumHandlers(2)
-                    .setResolver(a -> {
-                        resolverCalled.set(true);
-                        return a;
-                    }).setUseLocalHost(true);
+                    .setUseLocalHost(true);
 
             final TcpAddress addr = r.getAddress();
             LOGGER.debug(addr.toString());
@@ -92,7 +100,7 @@ public class NioTransportTest {
             r.start((Listener<RoutedMessage>) msg -> {
                 rm.set(msg);
                 return true;
-            }, tr.track(new DefaultThreadingModel(NioTransportTest.class.getSimpleName() + ".testReceiverStart")));
+            }, tr.track(new DefaultThreadingModel(TcpTransportTest.class.getSimpleName() + ".testReceiverStart")));
 
             try (final SenderFactory sf = senderFactory.get();) {
                 sf.start(new TestInfrastructure(null, null) {
@@ -104,7 +112,6 @@ public class NioTransportTest {
                 final Sender sender = sf.getSender(addr);
                 sender.send(new RoutedMessage(new int[] { 0 }, "Hello", "Hello"));
 
-                assertTrue(resolverCalled.get());
                 assertTrue(poll(o -> rm.get() != null));
                 assertEquals("Hello", rm.get().message);
             }
@@ -113,15 +120,11 @@ public class NioTransportTest {
 
     @Test
     public void testLargeMessage() throws Exception {
-        final AtomicBoolean resolverCalled = new AtomicBoolean(false);
         final String huge = TestWordCount.readBible();
-        try (ServiceTracker tr = new ServiceTracker();) {
-            final NioReceiver<RoutedMessage> r = tr.track(new NioReceiver<RoutedMessage>(new JsonSerializer()))
+        try (final ServiceTracker tr = new ServiceTracker();) {
+            final AbstractTcpReceiver<?, ?> r = tr.track(receiver.get())
                     .setNumHandlers(2)
-                    .setResolver(a -> {
-                        resolverCalled.set(true);
-                        return a;
-                    }).setUseLocalHost(true)
+                    .setUseLocalHost(true)
                     .setMaxMessageSize(1024 * 1024 * 1024);
 
             final TcpAddress addr = r.getAddress();
@@ -130,31 +133,28 @@ public class NioTransportTest {
             r.start((Listener<RoutedMessage>) msg -> {
                 rm.set(msg);
                 return true;
-            }, tr.track(new DefaultThreadingModel(NioTransportTest.class.getSimpleName() + ".testReceiverStart")));
+            }, tr.track(new DefaultThreadingModel(TcpTransportTest.class.getSimpleName() + ".testReceiverStart")));
 
             try (final SenderFactory sf = senderFactory.get();) {
                 sf.start(new TestInfrastructure(null, null));
                 final Sender sender = sf.getSender(addr);
                 sender.send(new RoutedMessage(new int[] { 0 }, "Hello", huge));
 
-                assertTrue(resolverCalled.get());
                 assertTrue(poll(o -> rm.get() != null));
                 assertEquals(huge, rm.get().message);
             }
         }
     }
 
+    private static final String NUM_SENDER_THREADS = "2";
+
     private void runMultiMessage(final int numThreads, final int numMessagePerThread, final String message, final Serializer serializer)
             throws Exception {
-        final AtomicBoolean resolverCalled = new AtomicBoolean(false);
         try (final ServiceTracker tr = new ServiceTracker();) {
-            final NioReceiver<RoutedMessage> r = tr.track(new NioReceiver<RoutedMessage>(serializer))
-                    .setNumHandlers(5)
-                    .setResolver(a -> {
-                        resolverCalled.set(true);
-                        return a;
-                    }).setUseLocalHost(true)
-                    .setMaxMessageSize(1024 * 1024 * 1024);;
+            final AbstractTcpReceiver<?, ?> r = tr.track(receiver.get())
+                    .setNumHandlers(2)
+                    .setUseLocalHost(true)
+                    .setMaxMessageSize(1024 * 1024 * 1024);
 
             final TcpAddress addr = r.getAddress();
             LOGGER.debug(addr.toString());
@@ -162,7 +162,7 @@ public class NioTransportTest {
             r.start((Listener<RoutedMessage>) msg -> {
                 msgCount.incrementAndGet();
                 return true;
-            }, tr.track(new DefaultThreadingModel(NioTransportTest.class.getSimpleName() + ".testReceiverStart")));
+            }, tr.track(new DefaultThreadingModel(TcpTransportTest.class.getSimpleName() + ".testReceiverStart")));
 
             final AtomicBoolean letMeGo = new AtomicBoolean(false);
             final CountDownLatch waitToExit = new CountDownLatch(1);
@@ -173,8 +173,8 @@ public class NioTransportTest {
                         @Override
                         public Map<String, String> getConfiguration() {
                             final Map<String, String> ret = new HashMap<>();
-                            ret.put(sf.getClass().getPackage().getName() + "." + NioSenderFactory.CONFIG_KEY_SENDER_THREADS, "5");
-                            ret.put(sf.getClass().getPackage().getName() + "." + NettySenderFactory.CONFIG_KEY_SENDER_THREADS, "2");
+                            ret.put(sf.getClass().getPackage().getName() + "." + NioSenderFactory.CONFIG_KEY_SENDER_THREADS, NUM_SENDER_THREADS);
+                            ret.put(sf.getClass().getPackage().getName() + "." + NettySenderFactory.CONFIG_KEY_SENDER_THREADS, NUM_SENDER_THREADS);
                             return ret;
                         }
                     });
@@ -186,7 +186,6 @@ public class NioTransportTest {
 
                     // we need to keep the sender factory going until all messages were accounted for
 
-                    System.out.println("Done!");
                     try {
                         waitToExit.await();
                     } catch (final InterruptedException ie) {}
@@ -201,8 +200,7 @@ public class NioTransportTest {
             letMeGo.set(true);
 
             // the total number of messages sent should be this count.
-            assertTrue(poll(new Long((long) numThreads * (long) numMessagePerThread), v -> {
-                System.out.println(v.toString() + " == " + msgCount);
+            assertTrue(poll(999999999L, new Long((long) numThreads * (long) numMessagePerThread), v -> {
                 try {
                     Thread.sleep(1000);
                 } catch (final InterruptedException e) {
@@ -230,6 +228,6 @@ public class NioTransportTest {
 
     @Test
     public void testMultiHugeMessage() throws Exception {
-        runMultiMessage(5, 100, "" + messageNum.incrementAndGet() + TestWordCount.readBible() + messageNum.incrementAndGet(), new JsonSerializer());
+        runMultiMessage(1, 500, "" + messageNum.incrementAndGet() + TestWordCount.readBible() + messageNum.incrementAndGet(), new JsonSerializer());
     }
 }

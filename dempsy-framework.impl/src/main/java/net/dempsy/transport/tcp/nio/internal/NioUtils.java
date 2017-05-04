@@ -1,4 +1,4 @@
-package net.dempsy.transport.tcp.nio;
+package net.dempsy.transport.tcp.nio.internal;
 
 import java.nio.ByteBuffer;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -7,20 +7,20 @@ import org.slf4j.Logger;
 
 import net.dempsy.util.io.MessageBufferOutput;
 
-class NioUtils {
+public class NioUtils {
     // =============================================================================
     // These classes manage the buffer pool used by the readers and clients
     // =============================================================================
-    static ConcurrentLinkedQueue<ReturnableBufferOutput> bufferPool = new ConcurrentLinkedQueue<>();
+    private static ConcurrentLinkedQueue<ReturnableBufferOutput> bufferPool = new ConcurrentLinkedQueue<>();
 
-    static ReturnableBufferOutput get() {
+    public static ReturnableBufferOutput get() {
         ReturnableBufferOutput ret = bufferPool.poll();
         if (ret == null)
             ret = new ReturnableBufferOutput();
         return ret;
     }
 
-    static void closeQueitly(final AutoCloseable ac, final Logger LOGGER, final String failedMessage) {
+    public static void closeQueitly(final AutoCloseable ac, final Logger LOGGER, final String failedMessage) {
         try {
             ac.close();
         } catch (final Exception e) {
@@ -28,10 +28,11 @@ class NioUtils {
         }
     }
 
-    static class ReturnableBufferOutput extends MessageBufferOutput {
+    public static class ReturnableBufferOutput extends MessageBufferOutput {
         private ByteBuffer bb = null;
+        private boolean flopped = false;
+
         public int messageStart = -1;
-        public int numMessages = 0;
 
         private ReturnableBufferOutput() {
             super(2048); /// holds at least one full packet
@@ -43,10 +44,14 @@ class NioUtils {
             return bb;
         }
 
-        public void flop() {
-            bb = null;
+        public ByteBuffer getFloppedBb() {
             final ByteBuffer lbb = getBb();
-            lbb.limit(getPosition());
+            if (!flopped) {
+                lbb.limit(getPosition());
+                lbb.position(0); // position to zero.
+                flopped = true;
+            }
+            return lbb;
         }
 
         @Override
@@ -54,8 +59,8 @@ class NioUtils {
             super.close();
             reset();
             messageStart = -1;
-            numMessages = 0;
-            bb.clear();
+            bb = null;
+            flopped = false;
             bufferPool.offer(this);
         }
 
@@ -67,6 +72,7 @@ class NioUtils {
                 bb = ByteBuffer.wrap(getBuffer());
                 bb.position(obb.position());
                 bb.limit(obb.limit());
+                flopped = false;
             }
         }
     }

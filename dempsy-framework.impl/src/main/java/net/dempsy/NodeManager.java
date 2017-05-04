@@ -189,7 +189,7 @@ public class NodeManager implements Infrastructure, AutoCloseable {
                         if (LOGGER.isDebugEnabled())
                             LOGGER.info(logmessage, e);
                         else
-                            LOGGER.info(logmessage);
+                            LOGGER.info(logmessage, e);
                     }
                     return false;
                 }

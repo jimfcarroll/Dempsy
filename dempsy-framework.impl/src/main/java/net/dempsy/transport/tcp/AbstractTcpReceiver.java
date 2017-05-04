@@ -4,12 +4,14 @@ import net.dempsy.serialization.Serializer;
 import net.dempsy.transport.Receiver;
 
 public abstract class AbstractTcpReceiver<A extends TcpAddress, T extends AbstractTcpReceiver<A, ?>> implements Receiver {
+    public final static int DEFAULT_MAX_MESSAGE_SIZE_BYTES = 1024 * 1024;
     protected final Serializer serializer;
 
     protected int internalPort;
     protected boolean useLocalHost = false;
     protected TcpAddressResolver<A> resolver = a -> a;
     protected final String serId;
+    protected int maxMessageSize = DEFAULT_MAX_MESSAGE_SIZE_BYTES;
 
     public AbstractTcpReceiver(final Serializer serializer, final int port) {
         this.internalPort = port;
@@ -32,5 +34,15 @@ public abstract class AbstractTcpReceiver<A extends TcpAddress, T extends Abstra
         this.resolver = resolver;
         return (T) this;
     }
+
+    public AbstractTcpReceiver<A, T> setMaxMessageSize(final int maxMessageSize) {
+        this.maxMessageSize = maxMessageSize;
+        return this;
+    }
+
+    @Override
+    public abstract TcpAddress getAddress();
+
+    public abstract AbstractTcpReceiver<A, T> setNumHandlers(int numHandlerThreads);
 
 }
